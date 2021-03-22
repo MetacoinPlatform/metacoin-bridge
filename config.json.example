@@ -1,0 +1,15 @@
+{
+	"cert_peer_pem": "-----BEGIN CERTIFICATE----- HIDDEN -----END CERTIFICATE-----",
+	"cert_orderer_pem": "-----BEGIN CERTIFICATE----- HIDDEN -----END CERTIFICATE-----",
+
+	"channel_name": "metacoin",
+	"chain_code_id": "metacoin",
+	"bind_peer_addr": "grpcs://127.0.0.1:7051",
+	"bind_orderer_addr": "grpcs://127.0.0.1:7060",
+	"bind_event_addr" : "grpcs://127.0.0.1:7050",
+	"redis_server":  {
+		"host":	"127.0.0.1",
+		"port": 6379,
+		"db": 4
+	}
+}
