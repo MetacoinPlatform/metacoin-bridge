@@ -4,7 +4,7 @@
 
 
 // init data.
-const app_ver = "ver 2.0.0";
+const app_ver = "ver 2.1.0";
 const app_title = "MetaCoin Bridge";
 const listen_port = 20920;
 const config = require('./config.json');
