@@ -4,7 +4,7 @@
 
 
 // init data.
-const app_ver = "ver 2.1.0";
+const app_ver = "ver 2.1.1";
 const app_title = "MetaCoin Bridge";
 const listen_port = 20920;
 const config = require('./config.json');
@@ -152,12 +152,10 @@ function HyperLedgerConnect() {
             FabricManager.eventhub.registerBlockEvent((block) => {
                 console.log(new Date().getTime() / 1000, 120, 'Successfully received a block event');
                 FabricManager.blockno = parseInt(block.header.number);
-                // <do something with the block>
-                // const event_block = Long.fromValue(block.header.number);
                 JobManager.count = 0;
+                console.log(new Date().getTime() / 1000, 140, 'Init block ::' + block.header.number );
             }, (error) => {
                 console.log(new Date().getTime() / 1000, 140, 'Failed to receive the block event ::' + error);
-                // <do something with the error>
             });
 
             await FabricManager.eventhub.connect({
@@ -369,7 +367,7 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                     JobManager.pendingT[item] = 1;
                 });
             } else {
-				console.log(proposalResponses);
+                console.log(proposalResponses);
                 console.log(new Date().getTime() / 1000, 372, 'proposal error');
                 throw new Error(proposalResponses[0].message);
             }
@@ -447,8 +445,8 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                     return;
                 }
                 if (request.fcn == "newwallet") {
-					let tx = await FabricManager.channel.queryTransaction(tx_id.getTransactionID(), FabricManager.peer, false, false);
-					let tx_parse = parse_transaction(tx);
+                    let tx = await FabricManager.channel.queryTransaction(tx_id.getTransactionID(), FabricManager.peer, false, false);
+                    let tx_parse = parse_transaction(tx);
                     res.json({
                         result: 'SUCCESS',
                         msg: '',
@@ -482,6 +480,14 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                     res.json({
                         result: 'SUCCESS',
                         msg: request.mrc100logkey,
+                        data: tx_id.getTransactionID()
+                    });
+                } else if (request.fcn == "mrc400create") {
+                    let tx = await FabricManager.channel.queryTransaction(tx_id.getTransactionID(), FabricManager.peer, false, false);
+                    let tx_parse = parse_transaction(tx);
+                    res.json({
+                        result: 'SUCCESS',
+                        msg: tx_parse[0].parameters[0],
                         data: tx_id.getTransactionID()
                     });
                 } else {
@@ -617,7 +623,8 @@ function parse_transaction(transaction) {
                     type: params.job_type || '',
                     values: params || '',
                     validationCode: transaction.validationCode,
-                    address: ''
+                    address: '',
+					datakey: rwsetlist[rwset].rwset.writes[w].key
                 };
                 if (txv.type == '') {
                     continue;
@@ -631,7 +638,8 @@ function parse_transaction(transaction) {
                     type: params.job_type || '',
                     values: params || '',
                     validationCode: transaction.validationCode,
-                    address: ''
+                    address: '',
+					datakey: rwsetlist[rwset].rwset.writes[w].key
                 };
 
                 if (mtcUtil.isAddress(rwsetlist[rwset].rwset.writes[w].key)) {
@@ -1121,20 +1129,20 @@ function post_multitransfer(req, res, next) {
     mtcUtil.ParameterCheck(req.body, 'checkkey');
     mtcUtil.ParameterCheck(req.body, 'signature');
 
-    try{
+    try {
         data = JSON.parse(req.body.transferlist);
     } catch (e) {
         return next(new Error('The transferlist must be a json encoded array'));
     }
 
-    if (Array.isArray(data) == false){
+    if (Array.isArray(data) == false) {
         return next(new Error('The transferlist must be a json encoded array'));
     }
-    if (data.length > 100 ){
+    if (data.length > 100) {
         return next(new Error('There must be no more than 100 recipients of multitransfer'));
     }
 
-    for (var key in data){
+    for (var key in data) {
         mtcUtil.ParameterCheck(data[key], 'address', "address");
         mtcUtil.ParameterCheck(data[key], 'amount', 'int', 1, 99);
         mtcUtil.ParameterCheck(data[key], 'unlockdate', 'int');
@@ -1399,33 +1407,33 @@ function post_token(req, res, next) {
         args: [req.body.owner]
     };
 
-	FabricManager.channel.queryByChaincode(request)
-		.then((query_responses) => {
-			if (query_responses && query_responses.length == 1) {
-				if (query_responses[0] instanceof Error) {
-					throw new Error(query_responses[0].toString());
-				} else {
-					req.body.decimal = parseInt(req.body.decimal);
-					redis.set('TKEY_TOKEN_' + query_responses[0].toString(), JSON.stringify(req.body), 'EX', 3600, function (err) {
-						if (err == null) {
-							res.json({
-								result: 'SUCCESS',
-								msg: '',
-								data: query_responses[0].toString()
-							});
-						}
-					});
-				}
-			} else {
-				throw new Error('Response Error');
-			}
-		}).catch((err) => {
-			res.json({
-				result: 'ERROR',
-				msg: err.message,
-				data: ''
-			});
-		});
+    FabricManager.channel.queryByChaincode(request)
+        .then((query_responses) => {
+            if (query_responses && query_responses.length == 1) {
+                if (query_responses[0] instanceof Error) {
+                    throw new Error(query_responses[0].toString());
+                } else {
+                    req.body.decimal = parseInt(req.body.decimal);
+                    redis.set('TKEY_TOKEN_' + query_responses[0].toString(), JSON.stringify(req.body), 'EX', 3600, function (err) {
+                        if (err == null) {
+                            res.json({
+                                result: 'SUCCESS',
+                                msg: '',
+                                data: query_responses[0].toString()
+                            });
+                        }
+                    });
+                }
+            } else {
+                throw new Error('Response Error');
+            }
+        }).catch((err) => {
+            res.json({
+                result: 'ERROR',
+                msg: err.message,
+                data: ''
+            });
+        });
 
 }
 
@@ -1474,15 +1482,15 @@ function post_tokenupdate_tokenbase(req, res, next) {
     mtcUtil.ParameterCheck(req.params, 'token');
     mtcUtil.ParameterCheck(req.params, 'baseToken');
 
-	let tx_id = FabricManager.client.newTransactionID();
-	let request = {
-		chaincodeId: config.chain_code_id,
-		fcn: 'tokenSetBase',
-		args: [req.params.token, req.params.baseToken, req.body.signature, req.params.tkey],
-		chainId: config.channel_name,
-		txId: tx_id
-	};
-	JobProcess(request, res, tx_id, [], [req.params.token, req.params.baseToken], 0);
+    let tx_id = FabricManager.client.newTransactionID();
+    let request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'tokenSetBase',
+        args: [req.params.token, req.params.baseToken, req.body.signature, req.params.tkey],
+        chainId: config.channel_name,
+        txId: tx_id
+    };
+    JobProcess(request, res, tx_id, [], [req.params.token, req.params.baseToken], 0);
 }
 
 
@@ -1556,17 +1564,17 @@ function post_token_burn(req, res, next) {
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.params, 'tkey');
 
-    var promise = getHyperLedgerData('TOKEN_DATA_' + req.body.token)
+    getHyperLedgerData('TOKEN_DATA_' + req.body.token)
         .then(function (token_data) {
-			var tx_id = FabricManager.client.newTransactionID();
-			var request = {
-				chaincodeId: config.chain_code_id,
-				fcn: 'tokenBurning',
-				args: [req.body.token, req.body.amount, req.body.signature, req.params.tkey],
-				chainId: config.channel_name,
-				txId: tx_id
-			};
-			JobProcess(request, res, tx_id, [token_data.owner], [req.body.token], 0);
+            var tx_id = FabricManager.client.newTransactionID();
+            var request = {
+                chaincodeId: config.chain_code_id,
+                fcn: 'tokenBurning',
+                args: [req.body.token, req.body.amount, req.body.signature, req.params.tkey],
+                chainId: config.channel_name,
+                txId: tx_id
+            };
+            JobProcess(request, res, tx_id, [token_data.owner], [req.body.token], 0);
         })
         .catch(function (err) {
             res.json({
@@ -1588,15 +1596,15 @@ function post_token_increase(req, res, next) {
 
     getHyperLedgerData('TOKEN_DATA_' + req.body.token)
         .then(function (token_data) {
-			var tx_id = FabricManager.client.newTransactionID();
-			var request = {
-				chaincodeId: config.chain_code_id,
-				fcn: 'tokenIncrease',
-				args: [req.body.token, req.body.amount, req.body.signature, req.params.tkey],
-				chainId: config.channel_name,
-				txId: tx_id
-			};
-			JobProcess(request, res, tx_id, [token_data.owner], [req.body.token], 0);
+            var tx_id = FabricManager.client.newTransactionID();
+            var request = {
+                chaincodeId: config.chain_code_id,
+                fcn: 'tokenIncrease',
+                args: [req.body.token, req.body.amount, req.body.signature, req.params.tkey],
+                chainId: config.channel_name,
+                txId: tx_id
+            };
+            JobProcess(request, res, tx_id, [token_data.owner], [req.body.token], 0);
         })
         .catch(function (err) {
             res.json({
@@ -1845,10 +1853,324 @@ function delete_mrc100_logger(req, res) {
 }
 
 
+function post_set(req, res, next) {
+    res.header('Cache-Control', 'no-cache');
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'set',
+        args: [req.params.key, req.body.data],
+        chainId: config.channel_name,
+        txId: tx_id
+    };
+    InvokePost(request, res, tx_id, [], []);
+}
+app.post('/set/:key', upload.array(), post_set);
+
+
+function get_mrc400(req, res) {
+    mtcUtil.ParameterCheck(req.params, 'mrc400id');
+    res.header('Cache-Control', 'no-cache');
+    const request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'mrc400get',
+        args: [req.params.mrc400id]
+    };
+    InvokeGet(request, res);
+}
+
+
+function post_mrc400(req, res) {
+    mtcUtil.ParameterCheck(req.body, 'owner', "address");
+    mtcUtil.ParameterCheck(req.body, 'name', "", 0, 128);
+    mtcUtil.ParameterCheck(req.body, 'url', "url", 1, 255);
+    mtcUtil.ParameterCheck(req.body, 'imageurl', "url", 1, 255);
+    mtcUtil.ParameterCheck(req.body, "allowtoken", "int", 1, 40);
+    mtcUtil.ParameterCheck(req.body, 'category', "", 1, 64);
+    mtcUtil.ParameterCheck(req.body, 'description', "", 1, 4096);
+    mtcUtil.ParameterCheck(req.body, 'itemurl', "url", 1, 255);
+    mtcUtil.ParameterCheck(req.body, 'itemimageurl', "url", 1, 255);
+    mtcUtil.ParameterCheck(req.body, 'data', 1, 4096);
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc400create',
+        args: [req.body.owner, req.body.name, req.body.url, req.body.imageurl, req.body.allowtoken,req.body.category, req.body.description, req.body.itemurl, req.body.itemimageurl, req.body.data,  req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [req.body.owner], [], 0);
+
+}
+
+
+function put_mrc400(req, res) {
+    mtcUtil.ParameterCheck(req.params, 'mrc400id');
+    mtcUtil.ParameterCheck(req.body, 'name', "option", 0, 128);
+    mtcUtil.ParameterCheck(req.body, 'url', "url", 0, 255);
+    mtcUtil.ParameterCheck(req.body, 'imageurl', "url", 0, 255);
+    mtcUtil.ParameterCheck(req.body, "allowtoken", "int", 1, 40);
+    mtcUtil.ParameterCheck(req.body, 'category', "option", 0, 64);
+    mtcUtil.ParameterCheck(req.body, 'description', "option", 0, 4096);
+    mtcUtil.ParameterCheck(req.body, 'itemurl', "url", 0, 255);
+    mtcUtil.ParameterCheck(req.body, 'itemimageurl', "url", 0, 255);
+    mtcUtil.ParameterCheck(req.body, 'data', "option", 0, 4096);
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc400update',
+        args: [req.params.mrc400id, req.body.name, req.body.url, req.body.imageurl, req.body.allowtoken,req.body.category, req.body.description, req.body.itemurl, req.body.itemimageurl, req.body.data,  req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [], [], 0);
+}
+
+
+
+function get_mrc401(req, res) {
+    mtcUtil.ParameterCheck(req.params, 'mrc401id');
+    res.header('Cache-Control', 'no-cache');
+
+    const request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'mrc401get',
+        args: [req.params.mrc401id]
+    };
+    InvokeGet(request, res);
+}
+
+
+
+function post_mrc401(req, res) {
+    mtcUtil.ParameterCheck(req.params, 'mrc400id');
+    mtcUtil.ParameterCheck(req.body, 'itemdata');
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc401create',
+        args: [req.params.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [], [], 0);
+}
+
+
+function put_mrc401_update(req, res) {
+    mtcUtil.ParameterCheck(req.params, 'mrc400id');
+    mtcUtil.ParameterCheck(req.body, 'itemdata');
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc401update',
+        args: [req.params.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [], [], 0);
+}
+
+function post_mrc401_transfer(req, res) {
+    mtcUtil.ParameterCheck(req.params, 'mrc401id');
+    mtcUtil.ParameterCheck(req.body, 'fromAddr', "address");
+    mtcUtil.ParameterCheck(req.body, 'toAddr', "address");
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc401transfer',
+        args: [req.params.mrc401id, req.body.fromAddr, req.body.toAddr, req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [], [], 0);
+
+}
+
+
+function post_mrc401_sell(req, res) {
+    mtcUtil.ParameterCheck(req.body, 'seller', "address");
+    mtcUtil.ParameterCheck(req.body, 'mrc400id');
+    mtcUtil.ParameterCheck(req.body, 'itemdata');
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc401sell',
+        args: [req.body.seller, req.body.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [req.body.seller], [], 0);
+
+}
+
+
+function post_mrc401_unsell(req, res) {
+    mtcUtil.ParameterCheck(req.body, 'seller', "address");
+    mtcUtil.ParameterCheck(req.body, 'mrc400id');
+    mtcUtil.ParameterCheck(req.body, 'itemdata');
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc401unsell',
+        args: [req.body.seller, req.body.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [req.body.seller], [], 0);
+
+}
+
+
+function post_mrc401_buy(req, res) {
+    mtcUtil.ParameterCheck(req.params, 'mrc401id');
+    mtcUtil.ParameterCheck(req.body, 'buyer', "address");
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc401buy',
+        args: [req.body.buyer, req.params.mrc401id, req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [req.body.buyer], [], 0);
+
+}
+
+
+function post_mrc401_auction(req, res) {
+    mtcUtil.ParameterCheck(req.body, 'seller', "address");
+    mtcUtil.ParameterCheck(req.body, 'mrc400id');
+    mtcUtil.ParameterCheck(req.body, 'itemdata');
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc401auction',
+        args: [req.body.seller, req.body.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [req.body.seller], [], 0);
+
+}
+
+
+function post_mrc401_unauction(req, res) {
+    mtcUtil.ParameterCheck(req.body, 'seller', "address");
+    mtcUtil.ParameterCheck(req.body, 'mrc400id');
+    mtcUtil.ParameterCheck(req.body, 'itemdata');
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc401unauction',
+        args: [req.body.seller, req.body.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [req.body.seller], [], 0);
+}
+
+function get_mrc401_auctionfinish(req, res) {
+    mtcUtil.ParameterCheck(req.params, 'mrc401id');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc401auctionfinish',
+        args: [req.params.mrc401id]
+    };
+    JobProcess(request, res, tx_id, [req.body.seller], [], 0);
+}
+
+function post_mrc401_bid(req, res) {
+    mtcUtil.ParameterCheck(req.params, 'mrc401id');
+    mtcUtil.ParameterCheck(req.body, 'buyer', "address");
+    mtcUtil.ParameterCheck(req.body, 'amount', "int");
+    mtcUtil.ParameterCheck(req.body, 'token', "int");
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc401bid',
+        args: [req.body.buyer, req.params.mrc401id, req.body.amount, req.body.token, req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [req.body.buyer], [], 0);
+
+}
+
+
+function post_mrc401_melt(req, res) {
+    mtcUtil.ParameterCheck(req.params, 'mrc401id');
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc401melt',
+        args: [req.params.mrc401id, req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [], [], 0);
+}
+
+
+
+
+
+function post_set(req, res, next) {
+    mtcUtil.ParameterCheck(req.params, 'key');
+    mtcUtil.ParameterCheck(req.body, 'data');
+    const request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'set',
+        args: [req.params.key, req.body.data]
+    };
+    InvokeGet(request, res);
+}
 
 
 // internal function
 app.get('/get/:key', get_get);
+app.post('/set/:key', upload.array(), post_set);
 
 // not chain code.
 app.get('/block/:block_no', get_block);
@@ -1903,6 +2225,28 @@ app.get('/mrc100/log/:mrc100key', upload.array(), get_mrc100_log);
 app.get('/mrc100/logger/:token', get_mrc100_logger);
 app.post('/mrc100/logger/:tkey', post_mrc100_logger);
 app.delete('/mrc100/logger/:tkey', delete_mrc100_logger);
+
+
+// mrc400
+app.get('/mrc400/:mrc400id', get_mrc400);
+app.post('/mrc400', upload.array(), post_mrc400);
+app.put('/mrc400/:mrc400id', upload.array(), put_mrc400);
+
+// mrc401
+app.get('/mrc401/:mrc401id', get_mrc401);
+app.post('/mrc401/transfer/:mrc401id', upload.array(), post_mrc401_transfer);
+app.post('/mrc401/sell', upload.array(), post_mrc401_sell);
+app.post('/mrc401/unsell', upload.array(), post_mrc401_unsell);
+app.post('/mrc401/buy/:mrc401id', upload.array(), post_mrc401_buy);
+app.post('/mrc401/melt/:mrc401id', upload.array(), post_mrc401_melt);
+app.post('/mrc401/bid/:mrc401id', upload.array(), post_mrc401_bid);
+app.post('/mrc401/auction', upload.array(), post_mrc401_auction);
+app.post('/mrc401/unauction', upload.array(), post_mrc401_unauction);
+app.get('/mrc401/auctionfinish/:mrc401id', upload.array(), get_mrc401_auctionfinish);
+app.put('/mrc401/:mrc400id', upload.array(), put_mrc401_update);
+app.post('/mrc401/:mrc400id', upload.array(), post_mrc401);
+
+
 
 // token update for mrc040
 app.post('/tokenUpdate/TokenBase/:tkey/:token/:baseToken', upload.array(), post_tokenupdate_tokenbase);
