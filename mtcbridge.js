@@ -4,7 +4,7 @@
 
 
 // init data.
-const app_ver = "ver 1.2.0";
+const app_ver = "ver 2.0.0";
 const app_title = "MetaCoin Bridge";
 const listen_port = 20920;
 const config = require('./config.json');
@@ -107,6 +107,9 @@ var FabricManager = {
     blockno: -1
 }
 
+
+
+
 function HyperLedgerConnect() {
     if (FabricManager.status != FabricStatus_Idle) {
         return;
@@ -116,11 +119,11 @@ function HyperLedgerConnect() {
     FabricManager.channel = FabricManager.client.newChannel(config.channel_name);
     FabricManager.peer = FabricManager.client.newPeer(config.bind_peer_addr, {
         'pem': config.cert_peer_pem,
-        'ssl-target-name-override': 'peer0.org1.example.com',
+        'ssl-target-name-override': config.cert_peer_host
     });
     FabricManager.orderer = FabricManager.client.newOrderer(config.bind_orderer_addr, {
         'pem': config.cert_orderer_pem,
-        'ssl-target-name-override': 'orderer.example.com'
+        'ssl-target-name-override': config.cert_orderer_host
     });
 
     FabricManager.channel.addPeer(FabricManager.peer);
@@ -142,15 +145,10 @@ function HyperLedgerConnect() {
 
         // get the enrolled user from persistence, this user will sign all requests
         return FabricManager.client.getUserContext('user1', true);
-    }).then((user_from_store) => {
+    }).then(async (user_from_store) => {
         if (user_from_store && user_from_store.isEnrolled()) {
 
-            FabricManager.eventhub = FabricManager.client.newEventHub();
-            FabricManager.eventhub.setPeerAddr(config.bind_event_addr, {
-                'pem': config.cert_peer_pem,
-                'ssl-target-name-override': 'peer0.org1.example.com'
-            });
-
+            FabricManager.eventhub = FabricManager.channel.newChannelEventHub(FabricManager.peer);
             FabricManager.eventhub.registerBlockEvent((block) => {
                 console.log(new Date().getTime() / 1000, 120, 'Successfully received a block event');
                 FabricManager.blockno = parseInt(block.header.number);
@@ -160,12 +158,9 @@ function HyperLedgerConnect() {
             }, (error) => {
                 console.log(new Date().getTime() / 1000, 140, 'Failed to receive the block event ::' + error);
                 // <do something with the error>
-            }, {
-                startBlock: 0,
-                endBlock: 'newest'
             });
 
-            FabricManager.eventhub.connect({
+            await FabricManager.eventhub.connect({
                 full_block: true
             });
 
@@ -374,8 +369,9 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                     JobManager.pendingT[item] = 1;
                 });
             } else {
+				console.log(proposalResponses);
                 console.log(new Date().getTime() / 1000, 372, 'proposal error');
-                throw new Error(proposalResponses[0].details);
+                throw new Error(proposalResponses[0].message);
             }
 
             var request = {
@@ -401,7 +397,7 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                     resolve({
                         event_status: 'TIMEOUT'
                     });
-                }, 5000);
+                }, 10000);
                 FabricManager.eventhub.registerTxEvent(transaction_id_string, (tx, code) => {
                     console.log(new Date().getTime() / 1000, 403, 'tx event handler result', transaction_id_string);
                     // this is the callback for transaction event status
@@ -427,7 +423,7 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
             });
             promises.push(txPromise);
             return Promise.all(promises);
-        }).then(function (results) {
+        }).then(async function (results) {
             console.log(new Date().getTime() / 1000, 436, 'sendTransactionProposal end');
 
             pending_addrs.forEach(function (item) {
@@ -439,21 +435,24 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
             });
 
             if (results && results[0] && results[0].status === 'SUCCESS') { } else {
+                /*
                 if (callback != undefined) {
                     callback('ERROR', 'Failed to order the transaction.');
                 }
+                */
                 throw new Error('Failed to order the transaction.');
             }
             if (results && results[1] && results[1].event_status === 'VALID') {
                 if (res == null) {
                     return;
                 }
-                console.log(request);
                 if (request.fcn == "newwallet") {
+					let tx = await FabricManager.channel.queryTransaction(tx_id.getTransactionID(), FabricManager.peer, false, false);
+					let tx_parse = parse_transaction(tx);
                     res.json({
                         result: 'SUCCESS',
                         msg: '',
-                        data: request.args[0]
+                        data: tx_parse[0].address
                     });
                 } else if (request.fcn == "mrc020set") {
                     res.json({
@@ -557,17 +556,21 @@ function parse_transaction(transaction) {
     var txsave_data = [];
     for (var act in actlist) {
         var rwsetlist = actlist[act].payload.action.proposal_response_payload.extension.results.ns_rwset;
+        if (rwsetlist.length == 2 && rwsetlist[0].namespace == '_lifecycle' && rwsetlist[1].namespace == 'lscc') {
+            if (txsave_data.length == 0) {
+                txsave_data.push({
+                    timestamp: Math.floor(new Date(transaction.transactionEnvelope.payload.header.channel_header.timestamp).valueOf() / 1000),
+                    id: transaction.transactionEnvelope.payload.header.channel_header.tx_id,
+                    parameters: [],
+                    token: "",
+                    type: "Chaincode Install or Update"
+                });
+            }
+            continue;
+        }
+
         for (var rwset in rwsetlist) {
-            if (rwsetlist.length == 1 && rwsetlist[rwset].namespace == 'lscc') {
-                if (txsave_data.length == 0) {
-                    txsave_data.push({
-                        timestamp: Math.floor(new Date(transaction.transactionEnvelope.payload.header.channel_header.timestamp).valueOf() / 1000),
-                        id: transaction.transactionEnvelope.payload.header.channel_header.tx_id,
-                        parameters: [],
-                        token: "",
-                        type: "Chaincode Install or Update"
-                    });
-                }
+            if (rwsetlist[rwset].namespace != 'metacoin') {
                 continue;
             }
             for (var w in rwsetlist[rwset].rwset.writes) {
@@ -662,6 +665,29 @@ function parse_transaction(transaction) {
     return txsave_data;
 }
 
+function get_get(req, res, next) {
+    const request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'get',
+        args: [req.params.key]
+    };
+    InvokeGet(request, res);
+}
+
+
+function post_set(req, res, next) {
+    res.header('Cache-Control', 'no-cache');
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'set',
+        args: [req.params.key, req.body.data],
+        chainId: config.channel_name,
+        txId: tx_id
+    };
+    InvokePost(request, res, tx_id, [], []);
+}
+
 function get_block(req, res, next) {
     if (req.params.block_no == undefined || req.params.block_no.length == 0) {
         return next(new Error("Parameter block_no missing"));
@@ -686,20 +712,8 @@ function get_block(req, res, next) {
         return;
     }
 
-    redis.get("BLOCK_" + block_no)
-        .then(function (value) {
-            if (value != null && value) {
-                return Promise.resolve(value);
-            } else {
-                return FabricManager.channel.queryBlock(block_no, FabricManager.peer, false, false);
-            }
-        })
-        .catch(function (err) {
-            return Promise.reject(err);
-        })
-
+    FabricManager.channel.queryBlock(block_no, FabricManager.peer, false, false)
         .then(function (block) {
-            console.log(block);
             if (typeof block == typeof "" && block != "") {
                 res.json({
                     result: 'SUCCESS',
@@ -727,7 +741,6 @@ function get_block(req, res, next) {
             }
             Promise.all(Promise_list)
                 .then(function (tx_list) {
-                    console.log(tx_list);
                     let dummy_cnt = 0;
                     for (var idx in tx_list) {
                         try {
@@ -830,39 +843,12 @@ function get_address(req, res, next) {
 function get_key(req, res, next) {
     res.header('Cache-Control', 'no-cache');
     mtcUtil.ParameterCheck(req.params, 'address');
-    let allowkey = {
-        'transfer': 1,
-        'token': 1,
-        'dapp': 1,
-        'exchange': 1,
-        'mrc020': 1,
-        'mrc030': 1,
-        'mrc040': 1,
-        'mrc100': 1,
-    }
-    if (allowkey[req.params.keytype] == undefined) {
-        return next(new Error("Temprary key type is error"));
-    }
-
-    let tkey = null;
-    tkey = mtcUtil.getRandomString(40);
-    redis.setnx('TKEY_' + tkey, req.params.keytype + '_' + req.params.address)
-        .then(function (value) {
-            redis.expire('TKEY_' + tkey, 3600, function (result) {
-                res.json({
-                    result: 'SUCCESS',
-                    msg: '',
-                    data: tkey
-                });
-            });
-        })
-        .catch(function (reason) {
-            res.json({
-                result: 'ERROR',
-                msg: reason,
-                data: ''
-            });
-        });
+    const request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'getNonce',
+        args: [req.params.address]
+    };
+    InvokeGet(request, res);
 }
 
 
@@ -951,36 +937,23 @@ function post_mrc030(req, res, next) {
     mtcUtil.ParameterCheck(req.body, 'rewardtype');
     mtcUtil.ParameterCheck(req.body, 'url', "url");
     mtcUtil.ParameterCheck(req.body, 'query');
+    mtcUtil.ParameterCheck(req.body, 'tkey');
     mtcUtil.ParameterCheck(req.body, 'sign_need', "option");
     mtcUtil.ParameterCheck(req.body, 'signature');
-    mtcUtil.ParameterCheck(req.body, 'tkey');
 
-    redis.get('TKEY_' + req.body.tkey)
-        .then(function (reply) {
-            if (reply == null) {
-                return next(new Error('Transfer key is not found'));
-            }
-            if (reply != 'mrc030_' + req.body.owner) {
-                return next(new Error('Transfer key is missmatch'));
-            }
-            // send the query proposal to the peer
-            redis.del('TKEY_' + req.body.tkey, function (reply) {
-                let mrc030key = ("MRC030_" + req.body.tkey).substr(0, 40);
-                console.log("mrc030key", mrc030key);
-                var tx_id = FabricManager.client.newTransactionID();
-                var request = {
-                    chaincodeId: config.chain_code_id,
-                    fcn: 'mrc030create',
-                    args: [req.body.owner, mrc030key, req.body.title, req.body.description, req.body.startdate, req.body.enddate, req.body.reward, req.body.rewardtoken, req.body.maxrewardrecipient, req.body.rewardtype, req.body.url, req.body.query, req.body.sign_need, req.body.signature, req.body.tkey],
-                    chainId: config.channel_name,
-                    txId: tx_id,
-                    mrc030key: mrc030key
-                };
-                JobProcess(request, res, tx_id, [req.body.owner], []);
-            });
-        }).catch(function (err) {
-            return next(err);
-        });
+
+    let mrc030key = "MRC030_" + mtcUtil.getRandomString(33)
+    console.log("mrc030key", mrc030key);
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'mrc030create',
+        args: [req.body.owner, mrc030key, req.body.title, req.body.description, req.body.startdate, req.body.enddate, req.body.reward, req.body.rewardtoken, req.body.maxrewardrecipient, req.body.rewardtype, req.body.url, req.body.query, req.body.sign_need, req.body.signature, req.body.tkey],
+        chainId: config.channel_name,
+        txId: tx_id,
+        mrc030key: mrc030key
+    };
+    JobProcess(request, res, tx_id, [req.body.owner], []);
 }
 
 
@@ -1062,16 +1035,11 @@ function post_address(req, res, next) {
         req.body.addinfo = '';
     }
 
-    let w = mtcUtil.getRandomString(30);
-    let c = "00000000" + crc32(w).toString(16);
-
-    let address = "MT" + w + c.slice(-8);
-    // address = "MTiiiiiiiiiiiiMETACOINiiiiiiiiii79c3496e";
     var tx_id = FabricManager.client.newTransactionID();
     var request = {
         chaincodeId: config.chain_code_id,
         fcn: 'newwallet',
-        args: [address, req.body.publickey, req.body.addinfo],
+        args: [req.body.publickey, req.body.addinfo],
         chainId: config.channel_name,
         txId: tx_id
     };
@@ -1112,7 +1080,7 @@ function post_transfer(req, res, next) {
     mtcUtil.ParameterCheck(req.body, 'to', "address");
     mtcUtil.ParameterCheck(req.body, 'token', "int");
     mtcUtil.ParameterCheck(req.body, 'amount', 'int', 1, 99);
-    mtcUtil.ParameterCheck(req.body, 'checkkey', "", 40, 40);
+    mtcUtil.ParameterCheck(req.body, 'checkkey');
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.body, 'unlockdate', "int");
 
@@ -1131,29 +1099,60 @@ function post_transfer(req, res, next) {
     req.body.tags = req.body.tags.substr(0, 64);
     req.body.memo = req.body.memo.substr(0, 2048);
 
-    redis.get('TKEY_' + req.body.checkkey)
-        .then(function (reply) {
-            if (reply == null) {
-                return next(new Error('Transfer key is not found'));
-            }
-            if (reply != 'transfer_' + req.body.from) {
-                return next(new Error('Transfer key is missmatch'));
-            }
-            // send the query proposal to the peer
-            redis.del('TKEY_' + req.body.checkkey, function (reply) {
-                var tx_id = FabricManager.client.newTransactionID();
-                var request = {
-                    chaincodeId: config.chain_code_id,
-                    fcn: 'transfer',
-                    args: [req.body.from, req.body.to, req.body.amount, req.body.token, req.body.signature, req.body.unlockdate, req.body.tags, req.body.memo, req.body.checkkey],
-                    chainId: config.channel_name,
-                    txId: tx_id
-                };
-                JobProcess(request, res, tx_id, [req.body.from, req.body.to], [], 0);
-            });
-        }).catch(function (err) {
-            return next(err);
-        })
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'transfer',
+        args: [req.body.from, req.body.to, req.body.amount, req.body.token, req.body.signature, req.body.unlockdate, req.body.tags, req.body.memo, req.body.checkkey],
+        chainId: config.channel_name,
+        txId: tx_id
+    };
+    JobProcess(request, res, tx_id, [req.body.from, req.body.to], [], 0);
+}
+
+
+function post_multitransfer(req, res, next) {
+    res.header('Cache-Control', 'no-cache');
+    var data = "";
+    // req.body.unlockdate = "0";
+    mtcUtil.ParameterCheck(req.body, 'from', "address");
+    mtcUtil.ParameterCheck(req.body, 'transferlist');
+    mtcUtil.ParameterCheck(req.body, 'token', "int");
+    mtcUtil.ParameterCheck(req.body, 'checkkey');
+    mtcUtil.ParameterCheck(req.body, 'signature');
+
+    try{
+        data = JSON.parse(req.body.transferlist);
+    } catch (e) {
+        return next(new Error('The transferlist must be a json encoded array'));
+    }
+
+    if (Array.isArray(data) == false){
+        return next(new Error('The transferlist must be a json encoded array'));
+    }
+    if (data.length > 100 ){
+        return next(new Error('There must be no more than 100 recipients of multitransfer'));
+    }
+
+    for (var key in data){
+        mtcUtil.ParameterCheck(data[key], 'address', "address");
+        mtcUtil.ParameterCheck(data[key], 'amount', 'int', 1, 99);
+        mtcUtil.ParameterCheck(data[key], 'unlockdate', 'int');
+
+        if (req.body.from == data[key].address) {
+            return next(new Error('The from address and to addressare the same.'));
+        }
+    }
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'multitransfer',
+        args: [req.body.from, req.body.transferlist, req.body.token, req.body.signature, req.body.checkkey],
+        chainId: config.channel_name,
+        txId: tx_id
+    };
+    JobProcess(request, res, tx_id, [req.body.from, req.body.to], [], 0);
 }
 
 
@@ -1184,68 +1183,20 @@ function post_exchange(req, res, next) {
         return next(new Error('The from address and to address are the same.'));
     }
 
-    var r1 = redis.get('TKEY_' + req.params.fromTkey)
-        .then(function (value) {
-            if (value == null || value == '') {
-                return next(new Error('from address temprary key not found'));
-            }
-
-            if (value != 'exchange_' + req.body.fromAddr) {
-                return next(new Error('from address temprary key miss match'));
-            }
-            return Promise.resolve(value);
-        }).catch(function (err) {
-            res.json({
-                result: 'ERROR',
-                msg: err.message,
-                data: ''
-            });
-        });
-
-    var r2 = redis.get('TKEY_' + req.params.toTkey)
-        .then(function (value) {
-            if (value == null || value == '') {
-                return next(new Error('to address temprary key not found'));
-            }
-
-            if (value != 'exchange_' + req.body.toAddr) {
-                return next(new Error('to address temprary key miss match'));
-            }
-            return Promise.resolve(value);
-        }).catch(function (err) {
-            res.json({
-                result: 'ERROR',
-                msg: err.message,
-                data: ''
-            });
-        });
-
-    Promise.all([r1, r2])
-        .then(function (values) {
-            var d1 = redis.del('TKEY_' + req.params.fromTkey)
-                .then(function (value) { })
-                .catch(function (err) { });
-            var d2 = redis.del('TKEY_' + req.params.toTkey)
-                .then(function (value) { })
-                .catch(function (err) { });
-            Promise.all([d1, d2])
-                .then(function (values) {
-                    var tx_id = FabricManager.client.newTransactionID();
-                    var request = {
-                        chaincodeId: config.chain_code_id,
-                        fcn: 'exchange',
-                        args: [req.body.fromAddr, req.body.fromAmount, req.body.fromToken, req.body.fromFeesendto, req.body.fromFeeamount, req.body.fromFeetoken,
-                        req.body.fromTag, req.body.fromMemo, req.body.fromSign,
-                        req.body.toAddr, req.body.toAmount, req.body.toToken, req.body.toFeesendto, req.body.toFeeamount, req.body.toFeetoken,
-                        req.body.toTag, req.body.toMemo, req.body.toSign,
-                        req.params.fromTkey, req.params.toTkey,
-                        ],
-                        chainId: config.channel_name,
-                        txId: tx_id
-                    };
-                    JobProcess(request, res, tx_id, [req.body.fromAddr, req.body.toAddr, req.body.fromFeesendto, req.body.toFeesendto], [], 0);
-                });
-        });
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'exchange',
+        args: [req.body.fromAddr, req.body.fromAmount, req.body.fromToken, req.body.fromFeesendto, req.body.fromFeeamount, req.body.fromFeetoken,
+        req.body.fromTag, req.body.fromMemo, req.body.fromSign,
+        req.body.toAddr, req.body.toAmount, req.body.toToken, req.body.toFeesendto, req.body.toFeeamount, req.body.toFeetoken,
+        req.body.toTag, req.body.toMemo, req.body.toSign,
+        req.params.fromTkey, req.params.toTkey,
+        ],
+        chainId: config.channel_name,
+        txId: tx_id
+    };
+    JobProcess(request, res, tx_id, [req.body.fromAddr, req.body.toAddr, req.body.fromFeesendto, req.body.toFeesendto], [], 0);
 
 }
 
@@ -1316,37 +1267,17 @@ function post_mrc040_cancel(req, res, next) {
     mtcUtil.ParameterCheck(req.body, 'mrc040id');
     mtcUtil.ParameterCheck(req.body, 'signature');
 
-    redis.get('TKEY_' + req.params.tkey)
-        .then(function (value) {
-            if (value == null || value == '') {
-                return next(new Error('Temprary key not found'));
-            }
+    let tx_id = FabricManager.client.newTransactionID();
+    // owner, side, BaseToken, TargetToken, price, qtt, exchangeItemPK
+    let request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'stodexUnRegister',
+        args: [req.body.owner, req.body.mrc040id, req.body.signature, req.params.tkey],
+        chainId: config.channel_name,
+        txId: tx_id
+    };
+    JobProcess(request, res, tx_id, [req.body.owner], [], 0);
 
-            if (value != 'mrc040_' + req.body.owner) {
-                return next(new Error('Temprary key not found'));
-            }
-
-            redis.del('TKEY_' + req.params.tkey, function (err, reply) {
-                let tx_id = FabricManager.client.newTransactionID();
-                // owner, side, BaseToken, TargetToken, price, qtt, exchangeItemPK
-                let request = {
-                    chaincodeId: config.chain_code_id,
-                    fcn: 'stodexUnRegister',
-                    args: [req.body.owner, req.body.mrc040id, req.body.signature, req.params.tkey],
-                    chainId: config.channel_name,
-                    txId: tx_id
-                };
-                JobProcess(request, res, tx_id, [req.body.owner], [], 0);
-            });
-        })
-        .catch(function (err) {
-            console.log(new Date().getTime() / 1000, 'line 1406');
-            res.json({
-                result: 'ERROR',
-                msg: err.message,
-                data: ''
-            });
-        });
 }
 
 
@@ -1362,55 +1293,19 @@ function post_mrc040_create(req, res, next) {
     mtcUtil.ParameterCheck(req.body, 'qtt', 'int');
     mtcUtil.ParameterCheck(req.body, 'signature');
 
-    if (mtcUtil.isNormalInteger(req.body.qtt) == false) {
-        res.json({
-            result: 'ERROR',
-            msg: 'QTT is must positive integer',
-            data: ''
-        });
-    }
-    if (mtcUtil.isNormalInteger(req.body.price) == false) {
-        res.json({
-            result: 'ERROR',
-            msg: 'Price is must positive integer',
-            data: ''
-        });
-    }
-
-    redis.get('TKEY_' + req.params.tkey)
-        .then(function (value) {
-            if (value == null || value == '') {
-                return next(new Error('Temprary key not found'));
-            }
-            if (value != 'mrc040_' + req.body.owner) {
-                return next(new Error('Temprary key not found'));
-            }
-
-            let now = Math.round(new Date().getTime() / 1000);
-            let MRC040KEY = "MRC040_" + req.params.tkey + "_" + now;
-            redis.del('TKEY_' + req.params.tkey, function (err, reply) {
-                let tx_id = FabricManager.client.newTransactionID();
-                // owner, side, BaseToken, TargetToken, price, qtt, exchangeItemPK
-                let request = {
-                    chaincodeId: config.chain_code_id,
-                    fcn: 'stodexRegister',
-                    args: [req.body.owner, req.body.side, req.body.basetoken, req.body.targettoken, req.body.price, req.body.qtt, MRC040KEY, req.body.signature, req.params.tkey],
-                    chainId: config.channel_name,
-                    txId: tx_id,
-                    mrc040key: MRC040KEY
-                };
-                JobProcess(request, res, tx_id, [req.body.owner], [], 0);
-            });
-
-        })
-        .catch(function (err) {
-            console.log(new Date().getTime() / 1000, 'line 1336');
-            res.json({
-                result: 'ERROR',
-                msg: err.message,
-                data: ''
-            });
-        });
+    let now = Math.round(new Date().getTime() / 1000);
+    let MRC040KEY = "MRC040_" + mtcUtil.getRandomString(40) + "_" + now;
+    let tx_id = FabricManager.client.newTransactionID();
+    // owner, side, BaseToken, TargetToken, price, qtt, exchangeItemPK
+    let request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'stodexRegister',
+        args: [req.body.owner, req.body.side, req.body.basetoken, req.body.targettoken, req.body.price, req.body.qtt, MRC040KEY, req.body.signature, req.params.tkey],
+        chainId: config.channel_name,
+        txId: tx_id,
+        mrc040key: MRC040KEY
+    };
+    JobProcess(request, res, tx_id, [req.body.owner], [], 0);
 }
 
 
@@ -1419,59 +1314,30 @@ function post_mrc040_exchange(req, res, next) {
     mtcUtil.ParameterCheck(req.params, 'tkey');
     mtcUtil.ParameterCheck(req.body, 'requester');
     mtcUtil.ParameterCheck(req.body, 'mrc040id');
-    mtcUtil.ParameterCheck(req.body, 'qtt');
+    mtcUtil.ParameterCheck(req.body, 'qtt', "int");
     mtcUtil.ParameterCheck(req.body, 'signature');
-
-    if (mtcUtil.isNormalInteger(req.body.qtt) == false) {
-        res.json({
-            result: 'ERROR',
-            msg: 'QTT is must positive integer',
-            data: ''
-        });
-    }
-
-    redis.get('TKEY_' + req.params.tkey)
-        .then(function (value) {
-            if (value == null || value == '') {
-                return next(new Error('Temprary key not found'));
-            }
-
-            if (value != 'mrc040_' + req.body.requester) {
-                return next(new Error('Temprary key miss match'));
-            }
-
-            redis.del('TKEY_' + req.params.tkey, function (err, reply) {
-                var promise = getHyperLedgerData(req.body.mrc040id)
-                    .then(function (mrc040_item) {
-                        let tx_id = FabricManager.client.newTransactionID();
-                        let now = Math.round(new Date().getTime() / 1000);
-                        let MRC040KEY = "MRC040_" + req.params.tkey + "_" + now;
-                        // owner, side, BaseToken, TargetToken, price, qtt, exchangeItemPK
-                        let request = {
-                            chaincodeId: config.chain_code_id,
-                            fcn: 'stodexExchange',
-                            args: [req.body.requester, req.body.qtt, req.body.mrc040id, MRC040KEY, req.body.signature, req.params.tkey],
-                            chainId: config.channel_name,
-                            txId: tx_id,
-                            mrc040key: MRC040KEY
-                        };
-                        JobProcess(request, res, tx_id, [req.body.requester, mrc040_item.Owner], [], 0);
-                    }, function (reason) {
-                        res.json({
-                            result: 'ERROR',
-                            msg: '6002,ExchangeItem not found',
-                            data: ''
-                        });
-                        return promise.reject(null);
-                    })
-                    .catch(function (err) {
-                        res.json({
-                            result: 'ERROR',
-                            msg: err.message,
-                            data: ''
-                        });
-                    });
+    getHyperLedgerData(req.body.mrc040id)
+        .then((mrc040_item) => {
+            let tx_id = FabricManager.client.newTransactionID();
+            let now = Math.round(new Date().getTime() / 1000);
+            let MRC040KEY = "MRC040_" + mtcUtil.getRandomString(40) + "_" + now;
+            // owner, side, BaseToken, TargetToken, price, qtt, exchangeItemPK
+            let request = {
+                chaincodeId: config.chain_code_id,
+                fcn: 'stodexExchange',
+                args: [req.body.requester, req.body.qtt, req.body.mrc040id, MRC040KEY, req.body.signature, req.params.tkey],
+                chainId: config.channel_name,
+                txId: tx_id,
+                mrc040key: MRC040KEY
+            };
+            JobProcess(request, res, tx_id, [req.body.requester, mrc040_item.Owner], [], 0);
+        }, function (reason) {
+            res.json({
+                result: 'ERROR',
+                msg: '6002,ExchangeItem not found',
+                data: ''
             });
+            return Promise.reject(null);
         })
         .catch(function (err) {
             res.json({
@@ -1502,9 +1368,6 @@ function post_token(req, res, next) {
         return next(new Error('totalsupply must be less then 1e30 (without decimals(precision))'));
     }
 
-
-
-    let tkey = mtcUtil.getRandomString(40);
     if (typeof req.body.tier == typeof []) {
         req.body.tier.forEach(function (tier) {
             tier.startdate = parseInt(tier.startdate);
@@ -1529,16 +1392,41 @@ function post_token(req, res, next) {
     } else {
         req.body.reserve = [];
     }
-    req.body.decimal = parseInt(req.body.decimal);
-    redis.set('TKEY_TOKEN_' + tkey, JSON.stringify(req.body), 'EX', 3600, function (err) {
-        if (err == null) {
-            res.json({
-                result: 'SUCCESS',
-                msg: '',
-                data: tkey
-            });
-        }
-    });
+
+    const request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'getNonce',
+        args: [req.body.owner]
+    };
+
+	FabricManager.channel.queryByChaincode(request)
+		.then((query_responses) => {
+			if (query_responses && query_responses.length == 1) {
+				if (query_responses[0] instanceof Error) {
+					throw new Error(query_responses[0].toString());
+				} else {
+					req.body.decimal = parseInt(req.body.decimal);
+					redis.set('TKEY_TOKEN_' + query_responses[0].toString(), JSON.stringify(req.body), 'EX', 3600, function (err) {
+						if (err == null) {
+							res.json({
+								result: 'SUCCESS',
+								msg: '',
+								data: query_responses[0].toString()
+							});
+						}
+					});
+				}
+			} else {
+				throw new Error('Response Error');
+			}
+		}).catch((err) => {
+			res.json({
+				result: 'ERROR',
+				msg: err.message,
+				data: ''
+			});
+		});
+
 }
 
 function post_token_tkey(req, res, next) {
@@ -1586,48 +1474,15 @@ function post_tokenupdate_tokenbase(req, res, next) {
     mtcUtil.ParameterCheck(req.params, 'token');
     mtcUtil.ParameterCheck(req.params, 'baseToken');
 
-    let TokenInfo;
-    var promise = getHyperLedgerData('TOKEN_DATA_' + req.params.token)
-        .then(function (token_data) {
-            TokenInfo = token_data;
-            return redis.get('TKEY_' + req.params.tkey);
-        }, function (reason) {
-            res.json({
-                result: 'ERROR',
-                msg: 'Token not found',
-                data: ''
-            });
-            return promise.reject(null);
-        }).then(function (value) {
-            if (value == null || value == '') {
-                throw new Error('Temprary key not found');
-            }
-
-            if (value != 'token_' + TokenInfo.owner) {
-                throw new Error('Temprary key miss match');
-            }
-
-            redis.del('TKEY_' + req.params.tkey, function (err, replay) {
-                let tx_id = FabricManager.client.newTransactionID();
-                let request = {
-                    chaincodeId: config.chain_code_id,
-                    fcn: 'tokenSetBase',
-                    args: [req.params.token, req.params.baseToken, req.body.signature, req.params.tkey],
-                    chainId: config.channel_name,
-                    txId: tx_id
-                };
-                JobProcess(request, res, tx_id, [], [req.params.token, req.params.baseToken], 0);
-            });
-        })
-        .catch(function (err) {
-            console.log(new Date().getTime() / 1000, 'line 1099');
-            console.log(new Date().getTime() / 1000, err);
-            res.json({
-                result: 'ERROR',
-                msg: err.message,
-                data: ''
-            });
-        });
+	let tx_id = FabricManager.client.newTransactionID();
+	let request = {
+		chaincodeId: config.chain_code_id,
+		fcn: 'tokenSetBase',
+		args: [req.params.token, req.params.baseToken, req.body.signature, req.params.tkey],
+		chainId: config.channel_name,
+		txId: tx_id
+	};
+	JobProcess(request, res, tx_id, [], [req.params.token, req.params.baseToken], 0);
 }
 
 
@@ -1638,48 +1493,16 @@ function post_tokenupdate_tokentargetadd(req, res, next) {
     mtcUtil.ParameterCheck(req.params, 'token');
     mtcUtil.ParameterCheck(req.params, 'targetToken');
 
-    let TokenInfo;
-    var promise = getHyperLedgerData('TOKEN_DATA_' + req.params.token)
-        .then(function (token_data) {
-            TokenInfo = token_data;
-            return redis.get('TKEY_' + req.params.tkey);
-        }, function (reason) {
-            res.json({
-                result: 'ERROR',
-                msg: 'Token not found',
-                data: ''
-            });
-            return promise.reject(null);
-        }).then(function (value) {
-            if (value == null || value == '') {
-                throw new Error('Temprary key not found');
-            }
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'tokenAddTarget',
+        args: [req.params.token, req.params.targetToken, req.body.signature, req.params.tkey],
+        chainId: config.channel_name,
+        txId: tx_id
+    };
+    JobProcess(request, res, tx_id, [], [req.params.token, req.params.targetToken], 0);
 
-            if (value != 'token_' + TokenInfo.owner) {
-                throw new Error('Temprary key miss match');
-            }
-
-            redis.del('TKEY_' + req.params.tkey, function (err, replay) {
-                var tx_id = FabricManager.client.newTransactionID();
-                var request = {
-                    chaincodeId: config.chain_code_id,
-                    fcn: 'tokenAddTarget',
-                    args: [req.params.token, req.params.targetToken, req.body.signature, req.params.tkey],
-                    chainId: config.channel_name,
-                    txId: tx_id
-                };
-                JobProcess(request, res, tx_id, [], [req.params.token, req.params.targetToken], 0);
-            });
-        })
-        .catch(function (err) {
-            console.log(new Date().getTime() / 1000, 'line 1073');
-            console.log(new Date().getTime() / 1000, err);
-            res.json({
-                result: 'ERROR',
-                msg: err.message,
-                data: ''
-            });
-        });
 }
 
 
@@ -1690,36 +1513,17 @@ function post_tokenupdate_tokentargetremove(req, res, next) {
     mtcUtil.ParameterCheck(req.params, 'token');
     mtcUtil.ParameterCheck(req.params, 'targetToken');
 
-    redis.get('TKEY_' + req.params.tkey)
-        .then(function (value) {
-            if (value == null || value == '') {
-                return next(new Error('Temprary key not found'));
-            }
 
-            if (value.indexOf('token_') != 0) {
-                return next(new Error('Temprary key miss match'));
-            }
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'tokenRemoveTarget',
+        args: [req.params.token, req.params.targetToken, req.body.signature, req.params.tkey],
+        chainId: config.channel_name,
+        txId: tx_id
+    };
+    JobProcess(request, res, tx_id, [], [req.params.token, req.params.targetToken], 0);
 
-            redis.del('TKEY_' + req.params.tkey, function (err, replay) {
-                var tx_id = FabricManager.client.newTransactionID();
-                var request = {
-                    chaincodeId: config.chain_code_id,
-                    fcn: 'tokenRemoveTarget',
-                    args: [req.params.token, req.params.targetToken, req.body.signature, req.params.tkey],
-                    chainId: config.channel_name,
-                    txId: tx_id
-                };
-                JobProcess(request, res, tx_id, [], [req.params.token, req.params.targetToken], 0);
-            });
-        })
-        .catch(function (err) {
-            console.log(new Date().getTime() / 1000, 'line 1259');
-            res.json({
-                result: 'ERROR',
-                msg: err.message,
-                data: ''
-            });
-        });
 }
 
 
@@ -1732,46 +1536,16 @@ function put_token(req, res, next) {
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.params, 'tkey');
 
-    let TokenInfo;
-    var promise = getHyperLedgerData('TOKEN_DATA_' + req.body.token)
-        .then(function (token_data) {
-            TokenInfo = token_data;
-            return redis.get('TKEY_' + req.params.tkey);
-        }, function (reason) {
-            res.json({
-                result: 'ERROR',
-                msg: 'Token not found',
-                data: ''
-            });
-            return promise.reject(null);
-        }).then(function (value) {
-            if (value == null || value == '') {
-                throw new Error('Temprary key not found');
-            }
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'tokenUpdate',
+        args: [req.body.token, req.body.url, req.body.info, req.body.image, req.body.signature, req.params.tkey],
+        chainId: config.channel_name,
+        txId: tx_id
+    };
+    JobProcess(request, res, tx_id, [], [req.body.token], 0);
 
-            if (value != 'token_' + TokenInfo.owner) {
-                throw new Error('Temprary key miss match');
-            }
-
-            redis.del('TKEY_' + req.params.tkey, function (err, reply) {
-                var tx_id = FabricManager.client.newTransactionID();
-                var request = {
-                    chaincodeId: config.chain_code_id,
-                    fcn: 'tokenUpdate',
-                    args: [req.body.token, req.body.url, req.body.info, req.body.image, req.body.signature, req.params.tkey],
-                    chainId: config.channel_name,
-                    txId: tx_id
-                };
-                JobProcess(request, res, tx_id, [], [req.body.token], 0);
-            });
-        })
-        .catch(function (err) {
-            res.json({
-                result: 'ERROR',
-                msg: err.message,
-                data: ''
-            });
-        });
 }
 
 
@@ -1782,38 +1556,17 @@ function post_token_burn(req, res, next) {
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.params, 'tkey');
 
-    let TokenInfo;
     var promise = getHyperLedgerData('TOKEN_DATA_' + req.body.token)
         .then(function (token_data) {
-            TokenInfo = token_data;
-            return redis.get('TKEY_' + req.params.tkey);
-        }, function (reason) {
-            res.json({
-                result: 'ERROR',
-                msg: 'Token not found',
-                data: ''
-            });
-            return promise.reject(null);
-        }).then(function (value) {
-            if (value == null || value == '') {
-                throw new Error('Temprary key not found');
-            }
-
-            if (value != 'token_' + TokenInfo.owner) {
-                throw new Error('Temprary key miss match');
-            }
-
-            redis.del('TKEY_' + req.params.tkey, function (err, reply) {
-                var tx_id = FabricManager.client.newTransactionID();
-                var request = {
-                    chaincodeId: config.chain_code_id,
-                    fcn: 'tokenBurning',
-                    args: [req.body.token, req.body.amount, req.body.signature, req.params.tkey],
-                    chainId: config.channel_name,
-                    txId: tx_id
-                };
-                JobProcess(request, res, tx_id, [TokenInfo.owner], [req.body.token], 0);
-            });
+			var tx_id = FabricManager.client.newTransactionID();
+			var request = {
+				chaincodeId: config.chain_code_id,
+				fcn: 'tokenBurning',
+				args: [req.body.token, req.body.amount, req.body.signature, req.params.tkey],
+				chainId: config.channel_name,
+				txId: tx_id
+			};
+			JobProcess(request, res, tx_id, [token_data.owner], [req.body.token], 0);
         })
         .catch(function (err) {
             res.json({
@@ -1822,6 +1575,7 @@ function post_token_burn(req, res, next) {
                 data: ''
             });
         });
+
 }
 
 
@@ -1832,39 +1586,17 @@ function post_token_increase(req, res, next) {
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.params, 'tkey');
 
-    let TokenInfo;
     getHyperLedgerData('TOKEN_DATA_' + req.body.token)
         .then(function (token_data) {
-            TokenInfo = token_data;
-            return redis.get('TKEY_' + req.params.tkey);
-        }, function (reason) {
-            // getHyperLedgerData('TOKEN_DATA_' + req.params.token) fail.
-            res.json({
-                result: 'ERROR',
-                msg: 'Token not found',
-                data: ''
-            });
-            return Promise.reject(null);
-        }).then(function (value) {
-            if (value == null || value == '') {
-                return next(new Error('Temprary key not found'));
-            }
-
-            if (value != 'token_' + TokenInfo.owner) {
-                return next(new Error('Temprary key miss match'));
-            }
-
-            redis.del('TKEY_' + req.params.tkey, function (err, reply) {
-                var tx_id = FabricManager.client.newTransactionID();
-                var request = {
-                    chaincodeId: config.chain_code_id,
-                    fcn: 'tokenIncrease',
-                    args: [req.body.token, req.body.amount, req.body.signature, req.params.tkey],
-                    chainId: config.channel_name,
-                    txId: tx_id
-                };
-                JobProcess(request, res, tx_id, [TokenInfo.owner], [req.body.token], 0);
-            });
+			var tx_id = FabricManager.client.newTransactionID();
+			var request = {
+				chaincodeId: config.chain_code_id,
+				fcn: 'tokenIncrease',
+				args: [req.body.token, req.body.amount, req.body.signature, req.params.tkey],
+				chainId: config.channel_name,
+				txId: tx_id
+			};
+			JobProcess(request, res, tx_id, [token_data.owner], [req.body.token], 0);
         })
         .catch(function (err) {
             res.json({
@@ -1873,6 +1605,7 @@ function post_token_increase(req, res, next) {
                 data: ''
             });
         });
+
 }
 
 
@@ -1925,16 +1658,6 @@ function post_mrc100_payment(req, res, next) {
                 return next(new Error('Invalid amount - ' + u.addres));
             }
             addr_list.push(u.address);
-            redis.get('TKEY_' + u.tkey, function (err, value) {
-                if (value == null || value == '') {
-                    return next(new Error('Temprary key not found - ' + u.addres));
-                }
-
-                if (value != 'mrc100_' + u.address) {
-                    return next(new Error('Temprary key miss match - ' + u.addres));
-                }
-                redis.del('TKEY_' + u.tkey);
-            });
         }
     } catch (err) {
         return next(err);
@@ -2006,29 +1729,15 @@ function post_mrc100_reward(req, res, next) {
         addr_list.push(u.address);
     }
 
-    redis.get('TKEY_' + req.body.tkey)
-        .then(function (reply) {
-            if (reply == null) {
-                return next(new Error('Transfer key is not found'));
-            }
-            if (reply != 'mrc100_' + req.body.from) {
-                return next(new Error('Transfer key is missmatch'));
-            }
-
-            redis.del('TKEY_' + req.body.tkey, function (reply) {
-                var tx_id = FabricManager.client.newTransactionID();
-                var request = {
-                    chaincodeId: config.chain_code_id,
-                    fcn: 'mrc100Reward',
-                    args: [req.body.from, req.body.token, req.body.userlist, req.body.gameid, req.body.gamememo, req.body.signature, req.body.tkey],
-                    chainId: config.channel_name,
-                    txId: tx_id
-                };
-                JobProcess(request, res, tx_id, addr_list, [], 0);
-            });
-        }).catch(function (err) {
-            return next(err);
-        })
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'mrc100Reward',
+        args: [req.body.from, req.body.token, req.body.userlist, req.body.gameid, req.body.gamememo, req.body.signature, req.body.tkey],
+        chainId: config.channel_name,
+        txId: tx_id
+    };
+    JobProcess(request, res, tx_id, addr_list, [], 0);
 }
 
 
@@ -2041,38 +1750,19 @@ function post_mrc100_log(req, res) {
 
     req.body.log = req.body.log.substr(0, 2048);
 
-    redis.get('TKEY_' + req.params.tkey)
-        .then(function (value) {
-            if (value == null || value == '') {
-                throw new Error('Temprary key not found');
-            }
 
-            if (value != 'mrc100_' + req.body.logger) {
-                throw new Error('Temprary key miss match');
-            }
-            let now = Math.round(new Date().getTime() / 1000);
-            let key = "MRC100_" + req.body.token + "_" + now + "_" + md5(req.body.log + req.body.signature + req.params.tkey);
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'mrc100Log',
+        args: [key, req.body.token, req.body.logger, req.body.log, req.body.signature, req.params.tkey],
+        chainId: config.channel_name,
+        txId: tx_id,
+        mrc100logkey: key
+    }
+    console.log('MRC100 LOG : ', key);
+    JobProcess(request, res, tx_id, [], [], 0);
 
-            redis.del('TKEY_' + req.params.tkey, function (err, replay) {
-                var tx_id = FabricManager.client.newTransactionID();
-                var request = {
-                    chaincodeId: config.chain_code_id,
-                    fcn: 'mrc100Log',
-                    args: [key, req.body.token, req.body.logger, req.body.log, req.body.signature, req.params.tkey],
-                    chainId: config.channel_name,
-                    txId: tx_id,
-                    mrc100logkey: key
-                }
-                console.log('MRC100 LOG : ', key);
-                JobProcess(request, res, tx_id, [], [], 0);
-            });
-        }).catch(function (err) {
-            res.json({
-                result: 'ERROR',
-                msg: err.message,
-                data: ''
-            });
-        });
 }
 
 
@@ -2125,47 +1815,15 @@ function post_mrc100_logger(req, res) {
     mtcUtil.ParameterCheck(req.body, 'signature');
 
 
-    let TokenInfo;
-    getHyperLedgerData('TOKEN_DATA_' + req.body.token)
-        .then(function (token_data) {
-            TokenInfo = token_data;
-            return redis.get('TKEY_' + req.params.tkey);
-        }, function (reason) {
-            // getHyperLedgerData('TOKEN_DATA_' + req.params.token) fail.
-            res.json({
-                result: 'ERROR',
-                msg: 'Token not found',
-                data: ''
-            });
-            return Promise.reject(null);
-        }).then(function (value) {
-            if (value == null || value == '') {
-                return next(new Error('Temprary key not found'));
-            }
-
-            if (value != 'mrc100_' + TokenInfo.owner) {
-                return next(new Error('Temprary key miss match'));
-            }
-
-            redis.del('TKEY_' + req.params.tkey, function (err, reply) {
-                var tx_id = FabricManager.client.newTransactionID();
-                var request = {
-                    chaincodeId: config.chain_code_id,
-                    fcn: 'tokenAddLogger',
-                    args: [req.body.token, req.body.address, req.body.signature, req.params.tkey],
-                    chainId: config.channel_name,
-                    txId: tx_id
-                };
-                JobProcess(request, res, tx_id, [], [req.body.token], 0);
-            });
-        })
-        .catch(function (err) {
-            res.json({
-                result: 'ERROR',
-                msg: err.message,
-                data: ''
-            });
-        });
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'tokenAddLogger',
+        args: [req.body.token, req.body.address, req.body.signature, req.params.tkey],
+        chainId: config.channel_name,
+        txId: tx_id
+    };
+    JobProcess(request, res, tx_id, [], [req.body.token], 0);
 }
 
 function delete_mrc100_logger(req, res) {
@@ -2175,52 +1833,22 @@ function delete_mrc100_logger(req, res) {
     mtcUtil.ParameterCheck(req.body, 'signature');
 
 
-    let TokenInfo;
-    getHyperLedgerData('TOKEN_DATA_' + req.body.token)
-        .then(function (token_data) {
-            TokenInfo = token_data;
-            return redis.get('TKEY_' + req.params.tkey);
-        }, function (reason) {
-            // getHyperLedgerData('TOKEN_DATA_' + req.params.token) fail.
-            res.json({
-                result: 'ERROR',
-                msg: 'Token not found',
-                data: ''
-            });
-            return Promise.reject(null);
-        }).then(function (value) {
-            if (value == null || value == '') {
-                return next(new Error('Temprary key not found'));
-            }
-
-            if (value != 'mrc100_' + TokenInfo.owner) {
-                return next(new Error('Temprary key miss match'));
-            }
-
-            redis.del('TKEY_' + req.params.tkey, function (err, reply) {
-                var tx_id = FabricManager.client.newTransactionID();
-                var request = {
-                    chaincodeId: config.chain_code_id,
-                    fcn: 'tokenRemoveLogger',
-                    args: [req.body.token, req.body.address, req.body.signature, req.params.tkey],
-                    chainId: config.channel_name,
-                    txId: tx_id
-                };
-                JobProcess(request, res, tx_id, [], [req.body.token], 0);
-            });
-        })
-        .catch(function (err) {
-            res.json({
-                result: 'ERROR',
-                msg: err.message,
-                data: ''
-            });
-        });
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'tokenRemoveLogger',
+        args: [req.body.token, req.body.address, req.body.signature, req.params.tkey],
+        chainId: config.channel_name,
+        txId: tx_id
+    };
+    JobProcess(request, res, tx_id, [], [req.body.token], 0);
 }
 
 
 
 
+// internal function
+app.get('/get/:key', get_get);
 
 // not chain code.
 app.get('/block/:block_no', get_block);
@@ -2235,6 +1863,7 @@ app.post('/address', upload.array(), post_address);
 
 // transfer and exchange
 app.post('/transfer', upload.array(), post_transfer);
+app.post('/multitransfer', upload.array(), post_multitransfer);
 app.post('/exchange/:fromTkey/:toTkey', upload.array(), post_exchange);
 
 // token
@@ -2279,6 +1908,12 @@ app.delete('/mrc100/logger/:tkey', delete_mrc100_logger);
 app.post('/tokenUpdate/TokenBase/:tkey/:token/:baseToken', upload.array(), post_tokenupdate_tokenbase);
 app.post('/tokenUpdate/TokenTargetAdd/:tkey/:token/:targetToken', upload.array(), post_tokenupdate_tokentargetadd);
 app.post('/tokenUpdate/TokenTargetRemove/:tkey/:token/:targetToken', upload.array(), post_tokenupdate_tokentargetremove);
+
+// for ICO.
+app.post('/buy', upload.array(), post_buy);
+
+// create the key value store as defined in the fabric-client/config/default.json 'key-value-store' setting
+// App init.
 
 
 app.use(function (err, req, res, next) {
