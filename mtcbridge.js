@@ -254,7 +254,6 @@ function PendingCheck(addresses, tokens) {
         }
     });
     if (needWait) {
-        console.log(new Date().getTime() / 1000, 263, 'need wait', remain_count);
         return false;
     }
 
@@ -269,7 +268,6 @@ function PendingCheck(addresses, tokens) {
             };
             InvokeDummy(request, request.txId);
         }
-        console.log(new Date().getTime() / 1000, 203, 'call dummy', remain_count);
         return PendingDummy;
     } else {
         addresses.forEach(function (item) {
@@ -278,7 +276,6 @@ function PendingCheck(addresses, tokens) {
         tokens.forEach(function (item) {
             JobManager.waitT[item] = 1;
         });
-        console.log(new Date().getTime() / 1000, 200, 'PendingCheck end - not block');
         JobManager.count = JobManager.count + 1;
         return PendingNothing;
     }
@@ -343,10 +340,8 @@ function InvokeDummy(request, tx_id) {
 
 function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
     // send the transaction proposal to the peers
-    console.log(new Date().getTime() / 1000, 360, 'InvokePost', tx_id.getTransactionID());
     FabricManager.channel.sendTransactionProposal(request)
         .then(function (results) {
-            console.log(new Date().getTime() / 1000, 363, 'sendTransactionProposal');
             pending_addrs.forEach(function (item) {
                 delete JobManager.waitA[item];
             });
@@ -359,7 +354,6 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
 
             if (proposalResponses && proposalResponses[0].response &&
                 proposalResponses[0].response.status === 200) {
-                console.log(new Date().getTime() / 1000, 370, 'proposal Good!!!');
                 pending_addrs.forEach(function (item) {
                     JobManager.pendingA[item] = 1;
                 });
@@ -367,8 +361,6 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                     JobManager.pendingT[item] = 1;
                 });
             } else {
-                console.log(proposalResponses);
-                console.log(new Date().getTime() / 1000, 372, 'proposal error');
                 throw new Error(proposalResponses[0].message);
             }
 
@@ -385,7 +377,6 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                 //we want the send transaction first, so that we know where to check status
                 promises.push(sendPromise);
             } catch (err) {
-                console.log(new Date().getTime() / 1000, 391, 'send tx error');
                 reject(err);
             }
 
@@ -422,7 +413,6 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
             promises.push(txPromise);
             return Promise.all(promises);
         }).then(async function (results) {
-            console.log(new Date().getTime() / 1000, 436, 'sendTransactionProposal end');
 
             pending_addrs.forEach(function (item) {
                 delete JobManager.pendingA[item];
@@ -445,8 +435,6 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                 let tx = await FabricManager.channel.queryTransaction(tx_id.getTransactionID(),
                     FabricManager.peer, false, false);
                 let tx_parse = parse_transaction(tx);
-                console.log(tx);
-                console.log(tx_parse);
                 switch (request.fcn) {
                     case "newwallet":
 						res.json({
@@ -516,11 +504,9 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
 
                 }
             } else {
-                console.log(results)
                 throw new Error('Transaction failed to be committed to the ledger due to ' + results[1].event_status);
             }
 
-            console.log(new Date().getTime() / 1000, 482, 'InvokePost', tx_id.getTransactionID());
         }).catch(function (err) {
             console.log(new Date().getTime() / 1000, 484, 'sendTransactionProposal error', err);
             pending_addrs.forEach(function (item) {
@@ -784,7 +770,6 @@ function get_block(req, res, next) {
                             timestamp: tx_list[idx][0].timestamp
                         });
                     }
-                    console.log(new Date().getTime() / 1000, 556, 'dummy count,', dummy_cnt, ', tx count', db_data.transaction.length);
                     redis.set("BLOCK_" + block_no, JSON.stringify(db_data), "EX", 600);
                     res.json({
                         result: 'SUCCESS',
@@ -968,7 +953,6 @@ function post_mrc030(req, res, next) {
 
 
     let mrc030key = "MRC030_" + mtcUtil.getRandomString(33)
-    console.log("mrc030key", mrc030key);
     var tx_id = FabricManager.client.newTransactionID();
     var request = {
         chaincodeId: config.chain_code_id,
@@ -1308,7 +1292,6 @@ function post_mrc040_cancel(req, res, next) {
 
 function post_mrc040_create(req, res, next) {
     res.header('Cache-Control', 'no-cache');
-    console.log(new Date().getTime() / 1000, req.body);
     mtcUtil.ParameterCheck(req.params, 'tkey');
     mtcUtil.ParameterCheck(req.body, 'owner', "address");
     mtcUtil.ParameterCheck(req.body, 'side');
@@ -1787,7 +1770,6 @@ function post_mrc100_log(req, res) {
         txId: tx_id,
         mrc100logkey: key
     }
-    console.log('MRC100 LOG : ', key);
     JobProcess(request, res, tx_id, [], [], 0);
 
 }
@@ -1823,7 +1805,6 @@ function get_mrc100_logger(req, res) {
                 }
                 data.logger[data.owner] = data.createdate;
                 rv = data.logger;
-                console.log(rv);
                 res.json({
                     result: 'SUCCESS',
                     msg: '',
