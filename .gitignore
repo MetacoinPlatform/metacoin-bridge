@@ -2,4 +2,4 @@ CVS
 .cvsignore
 hfc-key-store/*
 config.json
-node_modules/*
+node_modules
