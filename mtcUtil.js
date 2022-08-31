@@ -11,9 +11,9 @@ function NumberPadding(a) {
     return ("0000000000000000" + a).substr(-16);
 }
 
-function ParameterCheck(v, n, checktype, isOption, minlength, maxlength) {
+function ParameterCheck(v, n, checktype, minlength, maxlength) {
     if (v[n] === undefined) {
-        if(typeof(isOption) != 'undefined' && isOption){
+        if(checktype == "option"){
             v[n] = '';
             return;
         } else {
@@ -24,11 +24,8 @@ function ParameterCheck(v, n, checktype, isOption, minlength, maxlength) {
         return;
     }
     v[n] = v[n].trim();
-    if(v[n].length == 0 && isOption) {
-        return;
-    }
 
-    if(checktype == undefined || checktype == '' || checktype == 'string') {
+    if(checktype == undefined || checktype == '' || checktype == "option") {
         if (maxlength != undefined && maxlength > 0) {
             if (v[n].length > maxlength) {
                 throw new Error("The length of parameter " + n + "  must be less than " + maxlength);
@@ -37,7 +34,7 @@ function ParameterCheck(v, n, checktype, isOption, minlength, maxlength) {
 
         if (minlength != undefined && minlength > 0) {
             if (v[n].length < minlength) {
-                throw new Error("The length of parameter " + n + "  must be greater than " + minlength);
+                throw new Error("The length of parameter " + n + "  must be greater  than " + minlength);
             }
         }
 
@@ -62,9 +59,9 @@ function ParameterCheck(v, n, checktype, isOption, minlength, maxlength) {
             throw new Error("Parameter " + n + " must be Metacoin Address");
         }
     } else if (checktype == 'url') {
-		if(v[n].length == 0 && minlength == 0){
-			return;
-		}
+                if(v[n].length == 0 && minlength == 0){
+                    return;
+                }
         var urlRegex = '^(?!mailto:)(?:(?:http|https|ftp)://)(?:\\S+(?::\\S*)?@)?(?:(?:(?:[1-9]\\d?|1\\d\\d|2[01]\\d|22[0-3])(?:\\.(?:1?\\d{1,2}|2[0-4]\\d|25[0-5])){2}(?:\\.(?:[0-9]\\d?|1\\d\\d|2[0-4]\\d|25[0-4]))|(?:(?:[a-z\\u00a1-\\uffff0-9]+-?)*[a-z\\u00a1-\\uffff0-9]+)(?:\\.(?:[a-z\\u00a1-\\uffff0-9]+-?)*[a-z\\u00a1-\\uffff0-9]+)*(?:\\.(?:[a-z\\u00a1-\\uffff]{2,})))|localhost)(?::\\d{2,5})?(?:(/|\\?|#)[^\\s]*)?$';
         var url = new RegExp(urlRegex, 'i');
         if (v[n].length >= 2083 || !url.test(v[n])) {

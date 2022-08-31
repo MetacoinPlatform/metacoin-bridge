@@ -4,17 +4,17 @@
   "description": "MetaCoin Birgde",
   "main": "mtcbridge.js",
   "dependencies": {
-    "body-parser": "^1.20.0",
+    "body-parser": "^1.19.0",
     "crc": "^3.8.0",
-    "express": "^4.18.1",
-    "fabric-ca-client": "^2.2.13",
-    "fabric-client": "^1.4.20",
-    "grpc": "^1.24.11",
-    "ioredis": "^4.28.5",
+    "ec-key": "^0.0.2",
+    "express": "^4.17.1",
+    "fabric-ca-client": "^2.2.3",
+    "fabric-client": "^1.4.13",
+    "grpc": "^1.24.4",
+    "ioredis": "^4.19.4",
     "md5": "^2.3.0",
-    "multer": "^1.4.4",
-    "promise": "^8.1.0",
-    "yarn": "^1.22.19"
+    "multer": "^1.4.2",
+    "promise": "^8.1.0"
   },
   "license": "MIT",
   "repository": {
