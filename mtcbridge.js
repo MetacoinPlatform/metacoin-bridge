@@ -624,7 +624,7 @@ function parse_transaction(transaction) {
                     values: params || '',
                     validationCode: transaction.validationCode,
                     address: '',
-					datakey: rwsetlist[rwset].rwset.writes[w].key
+                                        datakey: rwsetlist[rwset].rwset.writes[w].key
                 };
                 if (txv.type == '') {
                     continue;
@@ -639,7 +639,7 @@ function parse_transaction(transaction) {
                     values: params || '',
                     validationCode: transaction.validationCode,
                     address: '',
-					datakey: rwsetlist[rwset].rwset.writes[w].key
+                                        datakey: rwsetlist[rwset].rwset.writes[w].key
                 };
 
                 if (mtcUtil.isAddress(rwsetlist[rwset].rwset.writes[w].key)) {

@@ -1,0 +1,17 @@
+{
+	"cert_peer_pem": "file contents of peerOrganizations/org1.metacoin.network/msp/tlscacerts/ca.crt",
+	"cert_peer_host": "peer1.org1.metacoin.network",
+        "cert_orderer_pem": "file contents of ordererOrganizations/metacoin.network/orderers/orderer3.metacoin.network/tls/ca.crt",
+	"cert_orderer_host": "orderer1.metacoin.network",
+	"channel_name": "metacoin",
+	"chain_code_id": "metacoin",
+	"bind_orderer_addr": "grpcs://localhost:7050",
+	"bind_peer_addr": "grpcs://localhost:7051",
+	"bind_event_addr" : "grpcs://localhost:7052",
+	"userid" : "user1",
+	"redis_server":  {
+		"host":	"127.0.0.1",
+		"port": 6379,
+		"db": 4
+	}
+}
