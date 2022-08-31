@@ -3,6 +3,19 @@
 "use strict";
 
 
+/*
+ let connectionOptions = {
+        identity: USER_ID,
+        wallet: wallet,
+        discovery: { enabled: false, asLocalhost: true },
+        eventHandlerOptions: {
+             strategy: null
+             }
+         }
+
+    await gateway.connect(connectionProfile, connectionOptions)
+    https://stackoverflow.com/questions/56936560/why-do-i-take-more-than-2-seconds-to-just-do-a-transaction
+*/
 // init data.
 const app_ver = "ver 2.1.1";
 const app_title = "MetaCoin Bridge";
@@ -11,21 +24,20 @@ const config = require('./config.json');
 const mtcUtil = require("./mtcUtil");
 
 // program start banner
-console.log(new Date().getTime() / 1000, app_title + " " + app_ver);
-
+console.log(new Date().toLocaleString(), app_title + " " + app_ver);
 
 // default handler.
 process.stderr.write = function (str, encoding, fg) {
     if (str.indexOf("message: Failed to get block number") == -1 &&
         str.indexOf("message: Failed to get transaction with id") == -1 &&
         str.indexOf("Promise is rejected: Error: 2 UNKNOWN: chaincode error (status: 500, message: Key not exist)") == -1) {
-        console.log(new Date().getTime() / 1000, str);
+        console.log(new Date().toLocaleString(), str);
     }
 }
 
 process.on('unhandledRejection', error => {
-    console.log(new Date().getTime() / 1000, '=== UNHANDLED REJECTION ===');
-    console.log(new Date().getTime() / 1000, error);
+    console.log(new Date().toLocaleString(), '=== UNHANDLED REJECTION ===');
+    console.log(new Date().toLocaleString(), error);
 });
 
 // default modules.
@@ -36,7 +48,6 @@ const express = require('express');
 const app = express();
 const bodyParser = require('body-parser');
 const md5 = require('md5');
-
 
 const multer = require('multer'),
     upload = multer();
@@ -56,7 +67,7 @@ app.use(function (req, res, next) {
     var ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
 
     if (!req.url.startsWith("/block/")) {
-        console.log(new Date().toTimeString(), ip.replace('::ffff:', ''), '\t', req.method, '\t', req.url);
+        console.log(new Date().toLocaleString(), ip.replace('::ffff:', ''), '\t', req.method, '\t', req.url);
     }
     if (FabricManager.status != FabricStatus_Connect) {
         res.status(503).json({
@@ -78,23 +89,17 @@ app.use(bodyParser.urlencoded({
     extended: true
 }));
 
-// const && internal variables.
-const PendingRetry = 1;
-const PendingDummy = 2;
-const PendingNothing = 0;
-
 const FabricStatus_Connect = 50;
 const FabricStatus_Wait = 10;
 const FabricStatus_Idle = 0;
 
 var JobManager = {
-    waitA: Object(),
-    waitT: Object(),
-    pendingA: Object(),
-    pendingT: Object(),
+    pendingA: new Map(),
     count: 0,
     job: new Array(),
-    timerid: null,
+    waitBlock: false,
+    waitJobProc: false,
+    txCount: 0,
 }
 
 var FabricManager = {
@@ -106,9 +111,6 @@ var FabricManager = {
     status: 0,
     blockno: -1
 }
-
-
-
 
 function HyperLedgerConnect() {
     if (FabricManager.status != FabricStatus_Idle) {
@@ -132,30 +134,27 @@ function HyperLedgerConnect() {
     Fabric_Client.newDefaultKeyValueStore({
         path: store_path
     }).then((state_store) => {
-        // assign the store to the fabric client
         FabricManager.client.setStateStore(state_store);
         var crypto_suite = Fabric_Client.newCryptoSuite();
-        // use the same location for the state store (where the users' certificate are kept)
-        // and the crypto store (where the users' keys are kept)
         var crypto_store = Fabric_Client.newCryptoKeyStore({
             path: store_path
         });
         crypto_suite.setCryptoKeyStore(crypto_store);
         FabricManager.client.setCryptoSuite(crypto_suite);
 
-        // get the enrolled user from persistence, this user will sign all requests
-        return FabricManager.client.getUserContext('user1', true);
+        return FabricManager.client.getUserContext(config.user || 'user1', true);
     }).then(async (user_from_store) => {
         if (user_from_store && user_from_store.isEnrolled()) {
 
             FabricManager.eventhub = FabricManager.channel.newChannelEventHub(FabricManager.peer);
             FabricManager.eventhub.registerBlockEvent((block) => {
-                console.log(new Date().getTime() / 1000, 120, 'Successfully received a block event');
                 FabricManager.blockno = parseInt(block.header.number);
+
+                console.log(new Date().toLocaleString(), 'BLOCK EVENT RECV', FabricManager.blockno)
+                JobManager.pendingA.clear();
+                JobManager.waitBlock = false;
                 JobManager.count = 0;
-                console.log(new Date().getTime() / 1000, 140, 'Init block ::' + block.header.number);
             }, (error) => {
-                console.log(new Date().getTime() / 1000, 140, 'Failed to receive the block event ::' + error);
             });
 
             await FabricManager.eventhub.connect({
@@ -163,121 +162,89 @@ function HyperLedgerConnect() {
             });
 
             FabricManager.status = FabricStatus_Connect;
-            console.log(new Date().getTime() / 1000, 159, 'HyperLedger Login Success');
+            console.log(new Date().toLocaleString(), 'HyperLedger Login Success');
         } else {
             throw new Error('HyperLedger Login fail');
         }
     }).catch(function (err) {
-        console.log(new Date().getTime() / 1000, 164, err);
+        console.log(new Date().toLocaleString(), 162, err);
         FabricManager.status = FabricStatus_Idle;
     });
 }
 
 function JobQueueCheck() {
-    let job;
+    /*
+    if (JobManager.waitBlock || JobManager.waitJobProc) {
+        setTimeout(JobQueueCheck, 10);
+        return;
+    }
+    */
+    if (JobManager.waitJobProc) {
+        setTimeout(JobQueueCheck, 10);
+        return;
+    }
+
     while (JobManager.job.length > 0) {
-        JobManager.job.reverse();
-        job = JobManager.job.pop();
-        JobManager.job.reverse();
+        let job = JobManager.job.shift();
         if (job.length != 6) {
-            console.log("Job length invalie", job);
             continue;
         }
-        job[5] = job[5] + 1;
-        if (job[5] > 10) {
+        if ((Date.now() - job[5]) > 5000) {
             job[1].json({
                 result: 'ERROR',
-                msg: 'Pending job wait timeout',
+                msg: 'Request job wait timeout',
                 data: ''
             });
-            console.log("Pending Error");
             continue;
         }
         JobProcess(job[0], job[1], job[2], job[3], job[4], job[5]);
         break;
     }
-    JobManager.timerid = setTimeout(JobQueueCheck, 50);
-    // console.log("Set Timeout");
+    setTimeout(JobQueueCheck, 10);
 }
 
-function JobProcess(req, res, tx_id, addr, token, loop_idx) {
-    let PendingCheckResult = PendingCheck(addr, token);
-    switch (PendingCheckResult) {
-        case PendingNothing:
-            console.log("Pendingjob Nothing!!!");
-            InvokePost(req, res, tx_id, addr, token);
-            break;
-        case PendingRetry:
-            console.log("Pendingjob PendingDummy!!!");
-            JobManager.job.push([req, res, tx_id, addr, token, loop_idx]);
-            break;
-        case PendingDummy:
-            console.log("Pendingjob PendingDummy!!!");
-            JobManager.job.push([req, res, tx_id, addr, token, loop_idx]);
-            break;
-    }
-}
-
-function PendingCheck(addresses, tokens) {
-    let needWait = false;
-    let needPedning = false;
-    let remain_count = 10 - JobManager.count;
-    console.log(new Date().getTime() / 1000, 181, 'PendingCheck start');
-    let SelfKey = Object();
-    addresses.forEach(function (item) {
-        if (SelfKey.hasOwnProperty(item)) {
+function JobProcess(req, res, tx_id, addresses, token, addTime) {
+    addTime = addTime || Date.now();
+    JobManager.waitJobProc = true
+    try{
+        let needPedning = false;
+        let address;
+        for (address of addresses) {
+            if (JobManager.pendingA.has(address)) {
+                // console.log('address dupe ', address)
+                needPedning = true;
+                break;
+            }
+        }
+        if (needPedning) {
+            let cnt = 0;
+            while(JobManager.count <10){
+                let request = {
+                    chaincodeId: config.chain_code_id,
+                    fcn: 'dummy',
+                    args: ["" + cnt],
+                    chainId: config.channel_name,
+                    txId: FabricManager.client.newTransactionID()
+                };
+                JobManager.count++;
+                InvokeDummy(request, request.txId);
+                cnt++;
+            }
+            if(cnt > 0) {
+                console.log('TXProcess for DUMMY ', cnt, JobManager.count);
+            }
+            JobManager.job.splice(0, 0, [req, res, tx_id, addresses, token, addTime]);
             return;
         }
-        SelfKey[item] = 1;
-        if (JobManager.waitA.hasOwnProperty(item)) {
-            needWait = true;
+        
+        for(address of addresses){
+            JobManager.pendingA.set(address, 1);
         }
-        if (JobManager.pendingA.hasOwnProperty(item)) {
-            needPedning = true;
-        }
-    });
-    if (needWait) {
-        return PendingRetry;
-    }
-
-    tokens.forEach(function (item) {
-        if (SelfKey.hasOwnProperty(item)) {
-            return;
-        }
-        SelfKey[item] = 1;
-
-        if (JobManager.waitT.hasOwnProperty(item)) {
-            needWait = true;
-        }
-        if (JobManager.pendingT.hasOwnProperty(item)) {
-            needPedning = true;
-        }
-    });
-    if (needWait) {
-        return false;
-    }
-
-    if (needPedning) {
-        for (var loop = 0; loop < remain_count; loop++) {
-            let request = {
-                chaincodeId: config.chain_code_id,
-                fcn: 'dummy',
-                args: ["" + loop],
-                chainId: config.channel_name,
-                txId: FabricManager.client.newTransactionID()
-            };
-            InvokeDummy(request, request.txId);
-        }
-        return PendingDummy;
-    } else {
-        addresses.forEach(function (item) {
-            JobManager.waitA[item] = 1;
-        });
-        tokens.forEach(function (item) {
-            JobManager.waitT[item] = 1;
-        });
-        JobManager.count = JobManager.count + 1;
-        return PendingNothing;
+        JobManager.count++;
+        console.log('Invoke POST', addresses[0], addresses[1], JobManager.count)
+        InvokePost(req, res, tx_id, addresses, token);
+    } finally {
+        JobManager.waitJobProc = false
     }
 }
 
@@ -307,8 +274,6 @@ function InvokeGet(request, res) {
 }
 
 function InvokeDummy(request, tx_id) {
-    // send the transaction proposal to the peers
-    //console.log(new Date().getTime() / 1000, 407, 'InvokeDummy Start', tx_id.getTransactionID());
     FabricManager.channel.sendTransactionProposal(request)
         .then((results) => {
             if (results[0] && results[0][0].response &&
@@ -326,41 +291,28 @@ function InvokeDummy(request, tx_id) {
                 return Promise.reject(new Error(results[0][0].details));
             }
         }).then((results) => {
-            // check the results in the order the promises were added to the promise all list
             if (results && results[0] && results[0].status === 'SUCCESS') {
-                // console.log(new Date().getTime() / 1000, 407, 'InvokeDummy End', tx_id.getTransactionID());
             } else {
-                // console.log(new Date().getTime() / 1000, 408, 'InvokeDummy Error', err);
             }
         }).catch((err) => {
-            // console.log(new Date().getTime() / 1000, 408, 'InvokeDummy Error', err);
         });
 }
 
 
 function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
-    // send the transaction proposal to the peers
     FabricManager.channel.sendTransactionProposal(request)
         .then(function (results) {
-            pending_addrs.forEach(function (item) {
-                delete JobManager.waitA[item];
-            });
-            pending_tokens.forEach(function (item) {
-                delete JobManager.waitT[item];
-            });
-
             var proposalResponses = results[0];
             var proposal = results[1];
 
             if (proposalResponses && proposalResponses[0].response &&
                 proposalResponses[0].response.status === 200) {
-                pending_addrs.forEach(function (item) {
-                    JobManager.pendingA[item] = 1;
-                });
-                pending_tokens.forEach(function (item) {
-                    JobManager.pendingT[item] = 1;
-                });
             } else {
+                for(let address of pending_addrs){
+                    console.log('Fail address remove ', address)
+                    JobManager.pendingA.delete(address);
+                }
+                console.log('throw error ', proposalResponses[0].message)
                 throw new Error(proposalResponses[0].message);
             }
 
@@ -377,24 +329,19 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                 //we want the send transaction first, so that we know where to check status
                 promises.push(sendPromise);
             } catch (err) {
-                reject(err);
+                 console.log(new Date().toLocaleString(), 391, 'send tx error');
+                return reject(err);
             }
 
             let txPromise = new Promise((resolve, reject) => {
                 let handle = setTimeout(() => {
-                    //we could use reject(new Error('Trnasaction did not complete within 30 seconds'));
                     resolve({
                         event_status: 'TIMEOUT'
                     });
-                }, 10000);
+                }, 100000);
                 FabricManager.eventhub.registerTxEvent(transaction_id_string, (tx, code) => {
-                    console.log(new Date().getTime() / 1000, 403, 'tx event handler result', transaction_id_string);
-                    // this is the callback for transaction event status
-                    // first some clean up of event listener
                     clearTimeout(handle);
                     FabricManager.eventhub.unregisterTxEvent(transaction_id_string);
-
-                    // now let the application know what happened
                     var return_status = {
                         event_status: code,
                         tx_id: transaction_id_string
@@ -413,15 +360,7 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
             promises.push(txPromise);
             return Promise.all(promises);
         }).then(async function (results) {
-
-            pending_addrs.forEach(function (item) {
-                delete JobManager.pendingA[item];
-            });
-
-            pending_tokens.forEach(function (item) {
-                delete JobManager.pendingT[item];
-            });
-
+            console.log('TX EVENT RECV')
             if (results && results[0] && results[0].status === 'SUCCESS') { } else {
                 throw new Error('Failed to order the transaction.');
             }
@@ -437,12 +376,12 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                 let tx_parse = parse_transaction(tx);
                 switch (request.fcn) {
                     case "newwallet":
-						res.json({
-							result: 'SUCCESS',
-							msg: '',
-							data: tx_parse[0].address
-						}); 
-						break;
+                        res.json({
+                            result: 'SUCCESS',
+                            msg: '',
+                            data: tx_parse[0].address
+                        });
+                        break;
                     case "mrc020set":
                         res.json({
                             result: 'SUCCESS',
@@ -450,7 +389,7 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             data: tx_id.getTransactionID(),
                             txid: tx_id.getTransactionID()
                         });
-						break;
+                        break;
                     case "mrc030create":
                         res.json({
                             result: 'SUCCESS',
@@ -458,7 +397,7 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             data: tx_id.getTransactionID(),
                             txid: tx_id.getTransactionID()
                         });
-						break;
+                        break;
                     case "stodexRegister":
                         res.json({
                             result: 'SUCCESS',
@@ -466,7 +405,7 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             data: tx_id.getTransactionID(),
                             txid: tx_id.getTransactionID()
                         });
-						break;
+                        break;
                     case "stodexExchange":
                         res.json({
                             result: 'SUCCESS',
@@ -474,7 +413,7 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             data: tx_id.getTransactionID(),
                             txid: tx_id.getTransactionID()
                         });
-						break;
+                        break;
                     case "mrc100Log":
                         res.json({
                             result: 'SUCCESS',
@@ -482,7 +421,8 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             data: tx_id.getTransactionID(),
                             txid: tx_id.getTransactionID()
                         });
-						break;
+                        break;
+                    case "mrc010sell":                        
                     case "mrc402sell":
                     case "mrc400create":
                     case "mrc402create":
@@ -493,7 +433,7 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             data: tx_id.getTransactionID(),
                             txid: tx_id.getTransactionID()
                         });
-						break;
+                        break;
                     default:
                         res.json({
                             result: 'SUCCESS',
@@ -507,21 +447,12 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                 throw new Error('Transaction failed to be committed to the ledger due to ' + results[1].event_status);
             }
 
+            // console.log(new Date().toLocaleString(), 482, 'InvokePost', tx_id.getTransactionID());
         }).catch(function (err) {
-            console.log(new Date().getTime() / 1000, 484, 'sendTransactionProposal error', err);
-            pending_addrs.forEach(function (item) {
-                delete JobManager.waitA[item];
-                delete JobManager.pendingA[item];
-            });
-
-            pending_tokens.forEach(function (item) {
-                delete JobManager.waitT[item];
-                delete JobManager.pendingT[item];
-            });
+            console.log(new Date().toLocaleString(), 482, request.fcn, request.args, err.message);
             if (res == null) {
                 return;
             }
-
             res.json({
                 result: 'ERROR',
                 msg: err.message,
@@ -726,6 +657,7 @@ function get_block(req, res, next) {
 
     FabricManager.channel.queryBlock(block_no, FabricManager.peer, false, false)
         .then(function (block) {
+            console.log('query block result');
             if (typeof block == typeof "" && block != "") {
                 res.json({
                     result: 'SUCCESS',
@@ -770,6 +702,7 @@ function get_block(req, res, next) {
                             timestamp: tx_list[idx][0].timestamp
                         });
                     }
+                    console.log(new Date().toLocaleString(), 556, 'dummy count,', dummy_cnt, ', tx count', db_data.transaction.length);
                     redis.set("BLOCK_" + block_no, JSON.stringify(db_data), "EX", 600);
                     res.json({
                         result: 'SUCCESS',
@@ -791,6 +724,39 @@ function get_block(req, res, next) {
             });
         });
 }
+
+
+app.get('/transactionraw/:transaction_id', (req, res) => {
+    FabricManager.channel.queryTransaction(req.params.transaction_id, FabricManager.peer, false, false)
+        .then(function (transaction) {
+            var actlist = transaction.transactionEnvelope.payload.data.actions;
+            var txsave_data = [];
+            for (var act in actlist) {
+                var rwsetlist = actlist[act].payload.action.proposal_response_payload.extension.results.ns_rwset;
+                for (var rwset in rwsetlist) {
+                    if (rwsetlist.length == 1 && rwsetlist[rwset].namespace == 'lscc') {
+                        continue;
+                    }
+                    for (var w in rwsetlist[rwset].rwset.writes) {
+                        if (rwsetlist[rwset].rwset.writes[w].key == 'MetaCoinICO') {
+                            continue;
+                        }
+                        console.log(rwsetlist[rwset].rwset.writes[w].key);
+                        txsave_data.push({
+                            data: rwsetlist[rwset].rwset.writes[w].value,
+                            validationCode: transaction.validationCode,
+                            datakey: rwsetlist[rwset].rwset.writes[w].key
+                        });
+                    }
+                }
+            }
+            txsave_data.reverse();
+            res.json({ result: 'SUCCESS', msg: '', data: txsave_data });
+        })
+        .catch(function (err) {
+            res.json({ result: 'ERROR', msg: err.message, data: '' });
+        });
+});
 
 
 function get_transaction(req, res, next) {
@@ -1213,7 +1179,7 @@ function post_exchange(req, res, next) {
 function post_mrc020(req, res, next) {
     res.header('Cache-Control', 'no-cache');
     mtcUtil.ParameterCheck(req.body, 'owner', "address");
-    mtcUtil.ParameterCheck(req.body, 'algorithm', "", true,  0, 64);
+    mtcUtil.ParameterCheck(req.body, 'algorithm', "", true, 0, 64);
     mtcUtil.ParameterCheck(req.body, 'data', "", false, 1, 2048);
     mtcUtil.ParameterCheck(req.body, 'publickey');
     mtcUtil.ParameterCheck(req.body, 'opendate');
@@ -1292,6 +1258,7 @@ function post_mrc040_cancel(req, res, next) {
 
 function post_mrc040_create(req, res, next) {
     res.header('Cache-Control', 'no-cache');
+    console.log(new Date().toLocaleString(), req.body);
     mtcUtil.ParameterCheck(req.params, 'tkey');
     mtcUtil.ParameterCheck(req.body, 'owner', "address");
     mtcUtil.ParameterCheck(req.body, 'side');
@@ -1338,7 +1305,7 @@ function post_mrc040_exchange(req, res, next) {
                 txId: tx_id,
                 mrc040key: MRC040KEY
             };
-            JobProcess(request, res, tx_id, [req.body.requester, mrc040_item.Owner], [], 0);
+            JobProcess(request, res, tx_id, [req.body.requester, mrc040_item.Owner], []);
         }, function (reason) {
             res.json({
                 result: 'ERROR',
@@ -1492,7 +1459,7 @@ function post_tokenupdate_tokenbase(req, res, next) {
         chainId: config.channel_name,
         txId: tx_id
     };
-    JobProcess(request, res, tx_id, [], [req.params.token, req.params.baseToken], 0);
+    JobProcess(request, res, tx_id, [], [req.params.token, req.params.baseToken]);
 }
 
 
@@ -1511,7 +1478,7 @@ function post_tokenupdate_tokentargetadd(req, res, next) {
         chainId: config.channel_name,
         txId: tx_id
     };
-    JobProcess(request, res, tx_id, [], [req.params.token, req.params.targetToken], 0);
+    JobProcess(request, res, tx_id, [], [req.params.token, req.params.targetToken]);
 
 }
 
@@ -1532,7 +1499,7 @@ function post_tokenupdate_tokentargetremove(req, res, next) {
         chainId: config.channel_name,
         txId: tx_id
     };
-    JobProcess(request, res, tx_id, [], [req.params.token, req.params.targetToken], 0);
+    JobProcess(request, res, tx_id, [], [req.params.token, req.params.targetToken]);
 
 }
 
@@ -1554,7 +1521,7 @@ function put_token(req, res, next) {
         chainId: config.channel_name,
         txId: tx_id
     };
-    JobProcess(request, res, tx_id, [], [req.body.token], 0);
+    JobProcess(request, res, tx_id, [], [req.body.token]);
 
 }
 
@@ -1563,6 +1530,7 @@ function post_token_burn(req, res, next) {
     res.header('Cache-Control', 'no-cache');
     mtcUtil.ParameterCheck(req.body, 'token');
     mtcUtil.ParameterCheck(req.body, 'amount', 'int');
+    mtcUtil.ParameterCheck(req.body, 'memo', "string", true);
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.params, 'tkey');
 
@@ -1572,11 +1540,11 @@ function post_token_burn(req, res, next) {
             var request = {
                 chaincodeId: config.chain_code_id,
                 fcn: 'tokenBurning',
-                args: [req.body.token, req.body.amount, req.body.signature, req.params.tkey],
+                args: [req.body.token, req.body.amount, req.body.memo, req.body.signature, req.params.tkey],
                 chainId: config.channel_name,
                 txId: tx_id
             };
-            JobProcess(request, res, tx_id, [token_data.owner], [req.body.token], 0);
+            JobProcess(request, res, tx_id, [token_data.owner], [req.body.token]);
         })
         .catch(function (err) {
             res.json({
@@ -1585,7 +1553,6 @@ function post_token_burn(req, res, next) {
                 data: ''
             });
         });
-
 }
 
 
@@ -1593,6 +1560,7 @@ function post_token_increase(req, res, next) {
     res.header('Cache-Control', 'no-cache');
     mtcUtil.ParameterCheck(req.body, 'token');
     mtcUtil.ParameterCheck(req.body, 'amount', 'int');
+    mtcUtil.ParameterCheck(req.body, 'memo', "string", true);
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.params, 'tkey');
 
@@ -1602,11 +1570,11 @@ function post_token_increase(req, res, next) {
             var request = {
                 chaincodeId: config.chain_code_id,
                 fcn: 'tokenIncrease',
-                args: [req.body.token, req.body.amount, req.body.signature, req.params.tkey],
+                args: [req.body.token, req.body.amount, req.body.memo, req.body.signature, req.params.tkey],
                 chainId: config.channel_name,
                 txId: tx_id
             };
-            JobProcess(request, res, tx_id, [token_data.owner], [req.body.token], 0);
+            JobProcess(request, res, tx_id, [token_data.owner], [req.body.token]);
         })
         .catch(function (err) {
             res.json({
@@ -1618,6 +1586,63 @@ function post_token_increase(req, res, next) {
 
 }
 
+function post_token_sell(req, res) {
+    mtcUtil.ParameterCheck(req.body, 'address', 'address');
+    mtcUtil.ParameterCheck(req.body, 'amount', "int");
+    mtcUtil.ParameterCheck(req.body, 'token', "int");
+    mtcUtil.ParameterCheck(req.body, 'price', "int");
+    mtcUtil.ParameterCheck(req.body, 'platform_name', "string", true, 0, 255);
+    mtcUtil.ParameterCheck(req.body, 'platform_url', "url", true, 0, 255);
+    mtcUtil.ParameterCheck(req.body, 'platform_address', "address", true);
+    mtcUtil.ParameterCheck(req.body, 'platform_commission', "string", true, 0, 5);
+
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc010sell',
+        args: [req.body.address, req.body.amount, req.params.mrc010id, req.body.price, req.body.token,
+        req.body.platform_name, req.body.platform_url, req.body.platform_address, req.body.platform_commission,
+        req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [req.body.address], []);
+}
+
+function post_token_unsell(req, res) {
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc010unsell',
+        args: [req.params.mrc010dexid, req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [req.body.address, req.params.mrc010dexid], []);
+}
+
+function post_token_buy(req, res) {
+    mtcUtil.ParameterCheck(req.body, 'address', 'address');
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'amount', "int");
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc010buy',
+        args: [req.params.mrc010dexid, req.body.address, req.body.amount, req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [req.body.address, req.params.mrc010dexid], []);
+}
 
 
 function post_mrc100_payment(req, res, next) {
@@ -1683,7 +1708,7 @@ function post_mrc100_payment(req, res, next) {
                 chainId: config.channel_name,
                 txId: tx_id
             };
-            JobProcess(request, res, tx_id, addr_list, [], 0);
+            JobProcess(request, res, tx_id, addr_list, []);
         });
 
 }
@@ -1747,7 +1772,7 @@ function post_mrc100_reward(req, res, next) {
         chainId: config.channel_name,
         txId: tx_id
     };
-    JobProcess(request, res, tx_id, addr_list, [], 0);
+    JobProcess(request, res, tx_id, addr_list, []);
 }
 
 
@@ -1770,7 +1795,7 @@ function post_mrc100_log(req, res) {
         txId: tx_id,
         mrc100logkey: key
     }
-    JobProcess(request, res, tx_id, [], [], 0);
+    JobProcess(request, res, tx_id, [], []);
 
 }
 
@@ -1785,10 +1810,7 @@ function get_mrc100_log(req, res, next) {
         args: [req.params.mrc100key]
     };
     InvokeGet(request, res);
-
-
 }
-
 
 
 function get_mrc100_logger(req, res) {
@@ -1811,7 +1833,7 @@ function get_mrc100_logger(req, res) {
                     data: rv
                 });
             } catch (e) {
-                console.log(e);
+                // console.log(e);
             }
         });
 }
@@ -1831,7 +1853,7 @@ function post_mrc100_logger(req, res) {
         chainId: config.channel_name,
         txId: tx_id
     };
-    JobProcess(request, res, tx_id, [], [req.body.token], 0);
+    JobProcess(request, res, tx_id, [], [req.body.token]);
 }
 
 function delete_mrc100_logger(req, res) {
@@ -1849,7 +1871,7 @@ function delete_mrc100_logger(req, res) {
         chainId: config.channel_name,
         txId: tx_id
     };
-    JobProcess(request, res, tx_id, [], [req.body.token], 0);
+    JobProcess(request, res, tx_id, [], [req.body.token]);
 }
 
 
@@ -1902,7 +1924,7 @@ function post_mrc400(req, res) {
         fcn: 'mrc400create',
         args: [req.body.owner, req.body.name, req.body.url, req.body.imageurl, req.body.allowtoken, req.body.category, req.body.description, req.body.itemurl, req.body.itemimageurl, req.body.data, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.body.owner], [], 0);
+    JobProcess(request, res, tx_id, [req.body.owner], []);
 
 }
 
@@ -1929,7 +1951,7 @@ function put_mrc400(req, res) {
         fcn: 'mrc400update',
         args: [req.params.mrc400id, req.body.name, req.body.url, req.body.imageurl, req.body.allowtoken, req.body.category, req.body.description, req.body.itemurl, req.body.itemimageurl, req.body.data, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [], [], 0);
+    JobProcess(request, res, tx_id, [], []);
 }
 
 
@@ -1961,7 +1983,7 @@ function post_mrc401(req, res) {
         fcn: 'mrc401create',
         args: [req.params.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [], [], 0);
+    JobProcess(request, res, tx_id, [], []);
 }
 
 
@@ -1979,7 +2001,7 @@ function put_mrc401_update(req, res) {
         fcn: 'mrc401update',
         args: [req.params.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [], [], 0);
+    JobProcess(request, res, tx_id, [], []);
 }
 
 function post_mrc401_transfer(req, res) {
@@ -1997,7 +2019,7 @@ function post_mrc401_transfer(req, res) {
         fcn: 'mrc401transfer',
         args: [req.params.mrc401id, req.body.fromAddr, req.body.toAddr, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [], [], 0);
+    JobProcess(request, res, tx_id, [], []);
 
 }
 
@@ -2017,7 +2039,7 @@ function post_mrc401_sell(req, res) {
         fcn: 'mrc401sell',
         args: [req.body.seller, req.body.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.body.seller], [], 0);
+    JobProcess(request, res, tx_id, [req.body.seller], []);
 
 }
 
@@ -2038,7 +2060,7 @@ function post_mrc401_unsell(req, res) {
         fcn: 'mrc401unsell',
         args: [req.body.seller, req.body.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.body.seller], [], 0);
+    JobProcess(request, res, tx_id, [req.body.seller], []);
 
 }
 
@@ -2057,7 +2079,7 @@ function post_mrc401_buy(req, res) {
         fcn: 'mrc401buy',
         args: [req.body.buyer, req.params.mrc401id, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.body.buyer], [], 0);
+    JobProcess(request, res, tx_id, [req.body.buyer], []);
 
 }
 
@@ -2077,7 +2099,7 @@ function post_mrc401_auction(req, res) {
         fcn: 'mrc401auction',
         args: [req.body.seller, req.body.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.body.seller], [], 0);
+    JobProcess(request, res, tx_id, [req.body.seller], []);
 
 }
 
@@ -2097,7 +2119,7 @@ function post_mrc401_unauction(req, res) {
         fcn: 'mrc401unauction',
         args: [req.body.seller, req.body.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.body.seller], [], 0);
+    JobProcess(request, res, tx_id, [req.body.seller], []);
 }
 
 function get_mrc401_auctionfinish(req, res) {
@@ -2111,7 +2133,7 @@ function get_mrc401_auctionfinish(req, res) {
         fcn: 'mrc401auctionfinish',
         args: [req.params.mrc401id]
     };
-    JobProcess(request, res, tx_id, [req.body.seller], [], 0);
+    JobProcess(request, res, tx_id, [req.body.seller], []);
 }
 
 function post_mrc401_bid(req, res) {
@@ -2130,7 +2152,7 @@ function post_mrc401_bid(req, res) {
         fcn: 'mrc401bid',
         args: [req.body.buyer, req.params.mrc401id, req.body.amount, req.body.token, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.body.buyer], [], 0);
+    JobProcess(request, res, tx_id, [req.body.buyer], []);
 
 }
 
@@ -2148,7 +2170,7 @@ function post_mrc401_melt(req, res) {
         fcn: 'mrc401melt',
         args: [req.params.mrc401id, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [], [], 0);
+    JobProcess(request, res, tx_id, [], []);
 }
 
 
@@ -2197,7 +2219,7 @@ function post_mrc402(req, res) {
         req.body.data, req.body.information, req.body.socialmedia, req.body.copyright_registration_country, req.body.copyright_registrar,
         req.body.copyright_registration_number, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.body.creator], [], 0);
+    JobProcess(request, res, tx_id, [req.body.creator], []);
 }
 
 function post_mrc402_transfer(req, res) {
@@ -2218,7 +2240,7 @@ function post_mrc402_transfer(req, res) {
         args: [req.body.fromAddr, req.body.toAddr, req.body.amount, req.params.mrc402id, req.body.tag,
         req.body.memo, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.body.fromAddr, req.body.toAddr], [], 0);
+    JobProcess(request, res, tx_id, [req.body.fromAddr, req.body.toAddr], []);
 }
 
 function put_mrc402(req, res) {
@@ -2241,7 +2263,7 @@ function put_mrc402(req, res) {
         args: [req.params.mrc402id, req.body.url, req.body.data, req.body.information, req.body.socialmedia,
         req.body.copyright_registration_country, req.body.copyright_registrar, req.body.copyright_registration_number, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.params.mrc402id], [], 0);
+    JobProcess(request, res, tx_id, [req.params.mrc402id], []);
 }
 
 
@@ -2259,7 +2281,7 @@ function put_mrc402_mint(req, res) {
         fcn: 'mrc402mint',
         args: [req.params.mrc402id, req.body.amount, req.body.memo, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.params.mrc402id], [], 0);
+    JobProcess(request, res, tx_id, [req.params.mrc402id], []);
 }
 
 
@@ -2277,7 +2299,7 @@ function put_mrc402_burn(req, res) {
         fcn: 'mrc402burn',
         args: [req.params.mrc402id, req.body.amount, req.body.memo, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.params.mrc402id], [], 0);
+    JobProcess(request, res, tx_id, [req.params.mrc402id], []);
 }
 
 function post_mrc402_melt(req, res) {
@@ -2294,7 +2316,7 @@ function post_mrc402_melt(req, res) {
         fcn: 'mrc402melt',
         args: [req.params.mrc402id, req.body.address, req.body.amount, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.body.address, req.params.mrc402id], [], 0);
+    JobProcess(request, res, tx_id, [req.body.address, req.params.mrc402id], []);
 }
 
 
@@ -2321,7 +2343,7 @@ function post_mrc402_sell(req, res) {
         req.body.platform_name, req.body.platform_url, req.body.platform_address, req.body.platform_commission,
         req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.body.address], [], 0);
+    JobProcess(request, res, tx_id, [req.body.address], []);
 }
 
 function post_mrc402_unsell(req, res) {
@@ -2336,7 +2358,7 @@ function post_mrc402_unsell(req, res) {
         fcn: 'mrc402unsell',
         args: [req.params.mrc402dexid, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.body.address, req.params.mrc402dexid], [], 0);
+    JobProcess(request, res, tx_id, [req.body.address, req.params.mrc402dexid], []);
 }
 
 function post_mrc402_buy(req, res) {
@@ -2353,7 +2375,7 @@ function post_mrc402_buy(req, res) {
         fcn: 'mrc402buy',
         args: [req.params.mrc402dexid, req.body.address, req.body.amount, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.body.address, req.params.mrc402dexid], [], 0);
+    JobProcess(request, res, tx_id, [req.body.address, req.params.mrc402dexid], []);
 }
 
 
@@ -2385,7 +2407,7 @@ function post_mrc402_auction(req, res) {
         req.body.auction_bidding_unit, req.body.auction_buynow_price, req.body.auction_start_date, req.body.auction_end_date, req.body.platform_name,
         req.body.platform_url, req.body.platform_address, req.body.platform_commission, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.body.address], [], 0);
+    JobProcess(request, res, tx_id, [req.body.address], []);
 }
 
 function post_mrc402_unauction(req, res) {
@@ -2400,7 +2422,7 @@ function post_mrc402_unauction(req, res) {
         fcn: 'mrc402unauction',
         args: [req.params.mrc402dexid, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.body.address, req.params.mrc402dexid], [], 0);
+    JobProcess(request, res, tx_id, [req.body.address, req.params.mrc402dexid], []);
 }
 
 function post_mrc402_bid(req, res) {
@@ -2417,7 +2439,7 @@ function post_mrc402_bid(req, res) {
         fcn: 'mrc402bid',
         args: [req.params.mrc402dexid, req.body.address, req.body.amount, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [req.body.address, req.params.mrc402dexid], [], 0);
+    JobProcess(request, res, tx_id, [req.body.address, req.params.mrc402dexid], []);
 }
 
 function get_mrc402_auctionfinish(req, res) {
@@ -2430,7 +2452,7 @@ function get_mrc402_auctionfinish(req, res) {
         fcn: 'mrc402auctionfinish',
         args: [req.params.mrc402dexid]
     };
-    JobProcess(request, res, tx_id, [req.body.seller, req.params.mrc402dexid], [], 0);
+    JobProcess(request, res, tx_id, [req.body.seller, req.params.mrc402dexid], []);
 }
 
 function get_mrc800(req, res) {
@@ -2462,7 +2484,7 @@ function post_mrc800(req, res) {
         fcn: 'mrc800create',
         args: [req.body.owner, req.body.name, req.body.url, req.body.imageurl, req.body.description, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [], [], 0);
+    JobProcess(request, res, tx_id, [], []);
 }
 
 
@@ -2483,7 +2505,7 @@ function put_mrc800(req, res) {
         fcn: 'mrc800update',
         args: [req.params.mrc800id, req.body.name, req.body.url, req.body.imageurl, req.body.description, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [], [], 0);
+    JobProcess(request, res, tx_id, [], []);
 
 }
 
@@ -2502,7 +2524,7 @@ function post_mrc800_take(req, res) {
         fcn: 'mrc800take',
         args: [req.params.mrc800id, req.body.from, req.body.url, req.body.imageurl, req.body.description, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [], [], 0);
+    JobProcess(request, res, tx_id, [], []);
 }
 
 
@@ -2521,7 +2543,7 @@ function post_mrc800_give(req, res) {
         fcn: 'mrc800give',
         args: [req.params.mrc800id, req.body.name, req.body.url, req.body.imageurl, req.body.description, req.body.signature, req.body.tkey]
     };
-    JobProcess(request, res, tx_id, [], [], 0);
+    JobProcess(request, res, tx_id, [], []);
 }
 
 function post_mrc800_transfer(req, res) {
@@ -2584,6 +2606,11 @@ app.post('/token/:tkey', upload.array(), post_token_tkey);
 app.put('/token/update/:tkey', upload.array(), put_token);
 app.put('/token/increase/:tkey', upload.array(), post_token_increase);
 app.put('/token/burn/:tkey', upload.array(), post_token_burn);
+
+app.post('/token/sell/:mrc010id', upload.array(), post_token_sell);
+app.post('/token/unsell/:mrc010dexid', upload.array(), post_token_unsell);
+app.post('/token/buy/:mrc010dexid', upload.array(), post_token_buy);
+
 
 // mrc020
 app.get('/mrc020/:mrc020key', get_mrc020);
@@ -2674,7 +2701,7 @@ app.post('/buy', upload.array(), post_buy);
 
 
 app.use(function (err, req, res, next) {
-    console.log(new Date().getTime() / 1000, err);
+    console.log(new Date().toLocaleString(), err);
     res.json({
         result: 'ERROR',
         msg: err.message,
@@ -2685,9 +2712,9 @@ app.use(function (err, req, res, next) {
 try {
     HyperLedgerConnect();
     http.createServer(app).listen(listen_port, function () {
-        console.log(new Date().getTime() / 1000, app_title + ' listening on port ' + listen_port);
+        console.log(new Date().toLocaleString(), app_title + ' listening on port ' + listen_port);
     });
-    JobManager.timerid = setTimeout(JobQueueCheck, 50);
+    setTimeout(JobQueueCheck, 10);
 } catch (err) {
     console.error(app_title + ' port ' + listen_port + ' bind error');
 }
