@@ -1109,6 +1109,7 @@ function post_multitransfer(req, res, next) {
         return next(new Error('There must be no more than 100 recipients of multitransfer'));
     }
 
+    let AddrList = [];
     for (var key in data) {
         mtcUtil.ParameterCheck(data[key], 'address', "address");
         mtcUtil.ParameterCheck(data[key], 'amount', 'int', false, 1, 99);
@@ -1117,7 +1118,9 @@ function post_multitransfer(req, res, next) {
         if (req.body.from == data[key].address) {
             return next(new Error('The from address and to addressare the same.'));
         }
+        AddrList.push(data[key].address);
     }
+    AddrList.push(req.body.from);
 
     var tx_id = FabricManager.client.newTransactionID();
     var request = {
@@ -1127,7 +1130,7 @@ function post_multitransfer(req, res, next) {
         chainId: config.channel_name,
         txId: tx_id
     };
-    JobProcess(request, res, tx_id, [req.body.from, req.body.to], [], 0);
+    JobProcess(request, res, tx_id, AddrList, [], 0);
 }
 
 
