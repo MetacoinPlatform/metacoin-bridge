@@ -206,7 +206,7 @@ function JobQueueCheck() {
 function JobProcess(req, res, tx_id, addresses, token, addTime) {
     addTime = addTime || Date.now();
     JobManager.waitJobProc = true
-    try{
+    try {
         let needPedning = false;
         let address;
         for (address of addresses) {
@@ -218,7 +218,7 @@ function JobProcess(req, res, tx_id, addresses, token, addTime) {
         }
         if (needPedning) {
             let cnt = 0;
-            while(JobManager.count <10){
+            while (JobManager.count < 10) {
                 let request = {
                     chaincodeId: config.chain_code_id,
                     fcn: 'dummy',
@@ -230,14 +230,14 @@ function JobProcess(req, res, tx_id, addresses, token, addTime) {
                 InvokeDummy(request, request.txId);
                 cnt++;
             }
-            if(cnt > 0) {
+            if (cnt > 0) {
                 console.log('TXProcess for DUMMY ', cnt, JobManager.count);
             }
             JobManager.job.splice(0, 0, [req, res, tx_id, addresses, token, addTime]);
             return;
         }
-        
-        for(address of addresses){
+
+        for (address of addresses) {
             JobManager.pendingA.set(address, 1);
         }
         JobManager.count++;
@@ -308,8 +308,7 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
             if (proposalResponses && proposalResponses[0].response &&
                 proposalResponses[0].response.status === 200) {
             } else {
-                for(let address of pending_addrs){
-                    console.log('Fail address remove ', address)
+                for (let address of pending_addrs) {
                     JobManager.pendingA.delete(address);
                 }
                 console.log('throw error ', proposalResponses[0].message)
@@ -329,7 +328,7 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                 //we want the send transaction first, so that we know where to check status
                 promises.push(sendPromise);
             } catch (err) {
-                 console.log(new Date().toLocaleString(), 391, 'send tx error');
+                console.log(new Date().toLocaleString(), 391, 'send tx error');
                 return reject(err);
             }
 
@@ -379,7 +378,9 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                         res.json({
                             result: 'SUCCESS',
                             msg: '',
-                            data: tx_parse[0].address
+                            data: tx_parse[0].address,
+                            txid: tx_id.getTransactionID(),
+                            code: '0'
                         });
                         break;
                     case "mrc020set":
@@ -387,7 +388,8 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             result: 'SUCCESS',
                             msg: request.mrc020key,
                             data: tx_id.getTransactionID(),
-                            txid: tx_id.getTransactionID()
+                            txid: tx_id.getTransactionID(),
+                            code: '0'
                         });
                         break;
                     case "mrc030create":
@@ -403,7 +405,8 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             result: 'SUCCESS',
                             msg: request.mrc040key,
                             data: tx_id.getTransactionID(),
-                            txid: tx_id.getTransactionID()
+                            txid: tx_id.getTransactionID(),
+                            code: '0'
                         });
                         break;
                     case "stodexExchange":
@@ -411,7 +414,8 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             result: 'SUCCESS',
                             msg: request.mrc040key,
                             data: tx_id.getTransactionID(),
-                            txid: tx_id.getTransactionID()
+                            txid: tx_id.getTransactionID(),
+                            code: '0'
                         });
                         break;
                     case "mrc100Log":
@@ -419,10 +423,12 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             result: 'SUCCESS',
                             msg: request.mrc100logkey,
                             data: tx_id.getTransactionID(),
-                            txid: tx_id.getTransactionID()
+                            txid: tx_id.getTransactionID(),
+                            code: '0'
                         });
                         break;
-                    case "mrc010sell":                        
+                    case "mrc010sell":
+                    case "mrc010reqsell":
                     case "mrc402sell":
                     case "mrc400create":
                     case "mrc402create":
@@ -431,7 +437,8 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             result: 'SUCCESS',
                             msg: tx_parse[0].parameters[0],
                             data: tx_id.getTransactionID(),
-                            txid: tx_id.getTransactionID()
+                            txid: tx_id.getTransactionID(),
+                            code: '0'
                         });
                         break;
                     default:
@@ -439,7 +446,8 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             result: 'SUCCESS',
                             msg: '',
                             data: tx_id.getTransactionID(),
-                            txid: tx_id.getTransactionID()
+                            txid: tx_id.getTransactionID(),
+                            code: '0'
                         });
 
                 }
@@ -456,7 +464,9 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
             res.json({
                 result: 'ERROR',
                 msg: err.message,
-                data: ''
+                data: '',
+                txid: '',
+                code: '0'
             });
         });
 }
@@ -2164,9 +2174,7 @@ function post_mrc401_auction(req, res) {
         args: [req.body.seller, req.body.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
     };
     JobProcess(request, res, tx_id, [req.body.seller], []);
-
 }
-
 
 function post_mrc401_unauction(req, res) {
     mtcUtil.ParameterCheck(req.body, 'seller', "address");
