@@ -206,7 +206,7 @@ function JobQueueCheck() {
 function JobProcess(req, res, tx_id, addresses, token, addTime) {
     addTime = addTime || Date.now();
     JobManager.waitJobProc = true
-    try{
+    try {
         let needPedning = false;
         let address;
         for (address of addresses) {
@@ -218,7 +218,7 @@ function JobProcess(req, res, tx_id, addresses, token, addTime) {
         }
         if (needPedning) {
             let cnt = 0;
-            while(JobManager.count <10){
+            while (JobManager.count < 10) {
                 let request = {
                     chaincodeId: config.chain_code_id,
                     fcn: 'dummy',
@@ -230,14 +230,14 @@ function JobProcess(req, res, tx_id, addresses, token, addTime) {
                 InvokeDummy(request, request.txId);
                 cnt++;
             }
-            if(cnt > 0) {
+            if (cnt > 0) {
                 console.log('TXProcess for DUMMY ', cnt, JobManager.count);
             }
             JobManager.job.splice(0, 0, [req, res, tx_id, addresses, token, addTime]);
             return;
         }
-        
-        for(address of addresses){
+
+        for (address of addresses) {
             JobManager.pendingA.set(address, 1);
         }
         JobManager.count++;
@@ -308,8 +308,7 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
             if (proposalResponses && proposalResponses[0].response &&
                 proposalResponses[0].response.status === 200) {
             } else {
-                for(let address of pending_addrs){
-                    console.log('Fail address remove ', address)
+                for (let address of pending_addrs) {
                     JobManager.pendingA.delete(address);
                 }
                 console.log('throw error ', proposalResponses[0].message)
@@ -329,7 +328,7 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                 //we want the send transaction first, so that we know where to check status
                 promises.push(sendPromise);
             } catch (err) {
-                 console.log(new Date().toLocaleString(), 391, 'send tx error');
+                console.log(new Date().toLocaleString(), 391, 'send tx error');
                 return reject(err);
             }
 
@@ -379,7 +378,9 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                         res.json({
                             result: 'SUCCESS',
                             msg: '',
-                            data: tx_parse[0].address
+                            data: tx_parse[0].address,
+                            txid: tx_id.getTransactionID(),
+                            code: '0'
                         });
                         break;
                     case "mrc020set":
@@ -387,7 +388,8 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             result: 'SUCCESS',
                             msg: request.mrc020key,
                             data: tx_id.getTransactionID(),
-                            txid: tx_id.getTransactionID()
+                            txid: tx_id.getTransactionID(),
+                            code: '0'
                         });
                         break;
                     case "mrc030create":
@@ -403,7 +405,8 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             result: 'SUCCESS',
                             msg: request.mrc040key,
                             data: tx_id.getTransactionID(),
-                            txid: tx_id.getTransactionID()
+                            txid: tx_id.getTransactionID(),
+                            code: '0'
                         });
                         break;
                     case "stodexExchange":
@@ -411,7 +414,8 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             result: 'SUCCESS',
                             msg: request.mrc040key,
                             data: tx_id.getTransactionID(),
-                            txid: tx_id.getTransactionID()
+                            txid: tx_id.getTransactionID(),
+                            code: '0'
                         });
                         break;
                     case "mrc100Log":
@@ -419,10 +423,12 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             result: 'SUCCESS',
                             msg: request.mrc100logkey,
                             data: tx_id.getTransactionID(),
-                            txid: tx_id.getTransactionID()
+                            txid: tx_id.getTransactionID(),
+                            code: '0'
                         });
                         break;
-                    case "mrc010sell":                        
+                    case "mrc010sell":
+                    case "mrc010reqsell":
                     case "mrc402sell":
                     case "mrc400create":
                     case "mrc402create":
@@ -431,7 +437,8 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             result: 'SUCCESS',
                             msg: tx_parse[0].parameters[0],
                             data: tx_id.getTransactionID(),
-                            txid: tx_id.getTransactionID()
+                            txid: tx_id.getTransactionID(),
+                            code: '0'
                         });
                         break;
                     default:
@@ -439,7 +446,8 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                             result: 'SUCCESS',
                             msg: '',
                             data: tx_id.getTransactionID(),
-                            txid: tx_id.getTransactionID()
+                            txid: tx_id.getTransactionID(),
+                            code: '0'
                         });
 
                 }
@@ -456,7 +464,9 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
             res.json({
                 result: 'ERROR',
                 msg: err.message,
-                data: ''
+                data: '',
+                txid: '',
+                code: '0'
             });
         });
 }
@@ -1647,6 +1657,67 @@ function post_token_buy(req, res) {
     JobProcess(request, res, tx_id, [req.body.address, req.params.mrc010dexid], []);
 }
 
+function post_token_reqsell(req, res) {
+    mtcUtil.ParameterCheck(req.body, 'address', 'address');
+    mtcUtil.ParameterCheck(req.body, 'amount', "int");
+    mtcUtil.ParameterCheck(req.body, 'token', "int");
+    mtcUtil.ParameterCheck(req.body, 'price', "int");
+    mtcUtil.ParameterCheck(req.body, 'platform_name', "string", true, 0, 255);
+    mtcUtil.ParameterCheck(req.body, 'platform_url', "url", true, 0, 255);
+    mtcUtil.ParameterCheck(req.body, 'platform_address', "address", true);
+    mtcUtil.ParameterCheck(req.body, 'platform_commission', "string", true, 0, 5);
+
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc010reqsell',
+        args: [req.body.address, req.body.amount, req.params.mrc010id, req.body.price, req.body.token,
+        req.body.platform_name, req.body.platform_url, req.body.platform_address, req.body.platform_commission,
+        req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [req.body.address], []);
+}
+
+function post_token_unreqsell(req, res) {
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc010unreqsell',
+        args: [req.params.mrc010dexid, req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [req.body.address, req.params.mrc010dexid], []);
+}
+
+function post_token_acceptreqsell(req, res) {
+    mtcUtil.ParameterCheck(req.body, 'address', 'address');
+    mtcUtil.ParameterCheck(req.body, 'signature');
+    mtcUtil.ParameterCheck(req.body, 'amount', "int");
+    mtcUtil.ParameterCheck(req.body, 'tkey');
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc010acceptreqsell',
+        args: [req.params.mrc010dexid, req.body.address, req.body.amount, req.body.signature, req.body.tkey]
+    };
+    JobProcess(request, res, tx_id, [req.body.address, req.params.mrc010dexid], []);
+}
+
+
+
+
 
 function post_mrc100_payment(req, res, next) {
     mtcUtil.ParameterCheck(req.body, 'to');
@@ -2103,9 +2174,7 @@ function post_mrc401_auction(req, res) {
         args: [req.body.seller, req.body.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
     };
     JobProcess(request, res, tx_id, [req.body.seller], []);
-
 }
-
 
 function post_mrc401_unauction(req, res) {
     mtcUtil.ParameterCheck(req.body, 'seller', "address");
@@ -2576,13 +2645,13 @@ function post_set(req, res, next) {
     };
     InvokePost(request, res, tx_id, [], []);
 }
-app.post('/set/:key', upload.array(), post_set);
+app.post('/set/:key', post_set);
 
 
 
 // internal function
 app.get('/get/:key', get_get);
-app.post('/set/:key', upload.array(), post_set);
+app.post('/set/:key', post_set);
 
 // not chain code.
 app.get('/block/:block_no', get_block);
@@ -2594,51 +2663,54 @@ app.get('/nonce/:address', get_nonce);
 
 // wallet
 app.get('/address/:address', get_address);
-app.post('/address', upload.array(), post_address);
+app.post('/address', post_address);
 
 // transfer and exchange
-app.post('/transfer', upload.array(), post_transfer);
-app.post('/multitransfer', upload.array(), post_multitransfer);
-app.post('/exchange/:fromTkey/:toTkey', upload.array(), post_exchange);
+app.post('/transfer', post_transfer);
+app.post('/multitransfer', post_multitransfer);
+app.post('/exchange/:fromTkey/:toTkey', post_exchange);
 
 // token
 app.get('/token/:token', get_token);
-app.post('/token', upload.array(), post_token);
-app.post('/token/:tkey', upload.array(), post_token_tkey);
+app.post('/token', post_token);
+app.post('/token/:tkey', post_token_tkey);
 // token update
-app.put('/token/update/:tkey', upload.array(), put_token);
-app.put('/token/increase/:tkey', upload.array(), post_token_increase);
-app.put('/token/burn/:tkey', upload.array(), post_token_burn);
+app.put('/token/update/:tkey', put_token);
+app.put('/token/increase/:tkey', post_token_increase);
+app.put('/token/burn/:tkey', post_token_burn);
 
-app.post('/token/sell/:mrc010id', upload.array(), post_token_sell);
-app.post('/token/unsell/:mrc010dexid', upload.array(), post_token_unsell);
-app.post('/token/buy/:mrc010dexid', upload.array(), post_token_buy);
+app.post('/token/sell/:mrc010id', post_token_sell);
+app.post('/token/unsell/:mrc010dexid', post_token_unsell);
+app.post('/token/buy/:mrc010dexid', post_token_buy);
 
+app.post('/token/reqsell/:mrc010id', post_token_reqsell);
+app.post('/token/unreqsell/:mrc010dexid', post_token_unreqsell);
+app.post('/token/acceptreqsell/:mrc010dexid', post_token_acceptreqsell);
 
 // mrc020
 app.get('/mrc020/:mrc020key', get_mrc020);
-app.post('/mrc020', upload.array(), post_mrc020);
+app.post('/mrc020', post_mrc020);
 
 // mrc030
 app.get('/mrc030/:mrc030key', get_mrc030);
 app.get('/mrc030/finish/:mrc030key', get_mrc030_finish);
-app.post('/mrc030', upload.array(), post_mrc030);
-app.post('/mrc030/:mrc030key', upload.array(), post_mrc030_join);
-app.get('/mrc031/:mrc031key', upload.array(), get_mrc031);
+app.post('/mrc030', post_mrc030);
+app.post('/mrc030/:mrc030key', post_mrc030_join);
+app.get('/mrc031/:mrc031key', get_mrc031);
 
 
 // mrc040
 app.get('/mrc040/:mrc040key', get_mrc040);
-app.post('/mrc040/cancel/:tkey', upload.array(), post_mrc040_cancel);
-app.post('/mrc040/create/:tkey', upload.array(), post_mrc040_create);
-app.post('/mrc040/exchange/:tkey', upload.array(), post_mrc040_exchange);
+app.post('/mrc040/cancel/:tkey', post_mrc040_cancel);
+app.post('/mrc040/create/:tkey', post_mrc040_create);
+app.post('/mrc040/exchange/:tkey', post_mrc040_exchange);
 
 
 // mrc100
-app.post('/mrc100/payment', upload.array(), post_mrc100_payment);
-app.post('/mrc100/reward', upload.array(), post_mrc100_reward);
-app.post('/mrc100/log/:tkey', upload.array(), post_mrc100_log);
-app.get('/mrc100/log/:mrc100key', upload.array(), get_mrc100_log);
+app.post('/mrc100/payment', post_mrc100_payment);
+app.post('/mrc100/reward', post_mrc100_reward);
+app.post('/mrc100/log/:tkey', post_mrc100_log);
+app.get('/mrc100/log/:mrc100key', get_mrc100_log);
 
 app.get('/mrc100/logger/:token', get_mrc100_logger);
 app.post('/mrc100/logger/:tkey', post_mrc100_logger);
@@ -2647,57 +2719,57 @@ app.delete('/mrc100/logger/:tkey', delete_mrc100_logger);
 
 // mrc400
 app.get('/mrc400/:mrc400id', get_mrc400);
-app.post('/mrc400', upload.array(), post_mrc400);
-app.put('/mrc400/:mrc400id', upload.array(), put_mrc400);
+app.post('/mrc400', post_mrc400);
+app.put('/mrc400/:mrc400id', put_mrc400);
 
 // mrc401
 app.get('/mrc401/:mrc401id', get_mrc401);
-app.post('/mrc401/transfer/:mrc401id', upload.array(), post_mrc401_transfer);
-app.post('/mrc401/sell', upload.array(), post_mrc401_sell);
-app.post('/mrc401/unsell', upload.array(), post_mrc401_unsell);
-app.post('/mrc401/buy/:mrc401id', upload.array(), post_mrc401_buy);
-app.post('/mrc401/melt/:mrc401id', upload.array(), post_mrc401_melt);
-app.post('/mrc401/bid/:mrc401id', upload.array(), post_mrc401_bid);
-app.post('/mrc401/auction', upload.array(), post_mrc401_auction);
-app.post('/mrc401/unauction', upload.array(), post_mrc401_unauction);
-app.get('/mrc401/auctionfinish/:mrc401id', upload.array(), get_mrc401_auctionfinish);
-app.put('/mrc401/:mrc400id', upload.array(), put_mrc401_update);
-app.post('/mrc401/:mrc400id', upload.array(), post_mrc401);
+app.post('/mrc401/transfer/:mrc401id', post_mrc401_transfer);
+app.post('/mrc401/sell', post_mrc401_sell);
+app.post('/mrc401/unsell', post_mrc401_unsell);
+app.post('/mrc401/buy/:mrc401id', post_mrc401_buy);
+app.post('/mrc401/melt/:mrc401id', post_mrc401_melt);
+app.post('/mrc401/bid/:mrc401id', post_mrc401_bid);
+app.post('/mrc401/auction', post_mrc401_auction);
+app.post('/mrc401/unauction', post_mrc401_unauction);
+app.get('/mrc401/auctionfinish/:mrc401id', get_mrc401_auctionfinish);
+app.put('/mrc401/:mrc400id', put_mrc401_update);
+app.post('/mrc401/:mrc400id', post_mrc401);
 
-app.get('/mrc402/:mrc402id', upload.array(), get_mrc402);
-app.post('/mrc402', upload.array(), post_mrc402);
-app.post('/mrc402/transfer/:mrc402id', upload.array(), post_mrc402_transfer);
-app.put('/mrc402/update/:mrc402id', upload.array(), put_mrc402);
-app.put('/mrc402/mint/:mrc402id', upload.array(), put_mrc402_mint);
-app.put('/mrc402/burn/:mrc402id', upload.array(), put_mrc402_burn);
-app.post('/mrc402/melt/:mrc402id', upload.array(), post_mrc402_melt);
+app.get('/mrc402/:mrc402id', get_mrc402);
+app.post('/mrc402', post_mrc402);
+app.post('/mrc402/transfer/:mrc402id', post_mrc402_transfer);
+app.put('/mrc402/update/:mrc402id', put_mrc402);
+app.put('/mrc402/mint/:mrc402id', put_mrc402_mint);
+app.put('/mrc402/burn/:mrc402id', put_mrc402_burn);
+app.post('/mrc402/melt/:mrc402id', post_mrc402_melt);
 
-app.post('/mrc402/sell/:mrc402id', upload.array(), post_mrc402_sell);
-app.post('/mrc402/unsell/:mrc402dexid', upload.array(), post_mrc402_unsell);
-app.post('/mrc402/buy/:mrc402dexid', upload.array(), post_mrc402_buy);
-app.post('/mrc402/bid/:mrc402dexid', upload.array(), post_mrc402_bid);
-app.post('/mrc402/auction/:mrc402id', upload.array(), post_mrc402_auction);
-app.post('/mrc402/unauction/:mrc402dexid', upload.array(), post_mrc402_unauction);
-app.get('/mrc402/auctionfinish/:mrc402dexid', upload.array(), get_mrc402_auctionfinish);
+app.post('/mrc402/sell/:mrc402id', post_mrc402_sell);
+app.post('/mrc402/unsell/:mrc402dexid', post_mrc402_unsell);
+app.post('/mrc402/buy/:mrc402dexid', post_mrc402_buy);
+app.post('/mrc402/bid/:mrc402dexid', post_mrc402_bid);
+app.post('/mrc402/auction/:mrc402id', post_mrc402_auction);
+app.post('/mrc402/unauction/:mrc402dexid', post_mrc402_unauction);
+app.get('/mrc402/auctionfinish/:mrc402dexid', get_mrc402_auctionfinish);
 
 
 // mrc800 - point
 app.get('/mrc800/:mrc800id', get_mrc800);
-app.post('/mrc800', upload.array(), post_mrc800);
-app.put('/mrc800/:mrc800id', upload.array(), put_mrc800);
+app.post('/mrc800', post_mrc800);
+app.put('/mrc800/:mrc800id', put_mrc800);
 
-app.post('/mrc800/transfer', upload.array(), post_mrc800_transfer);
-app.post('/mrc800/take', upload.array(), post_mrc800_take);
-app.post('/mrc800/give', upload.array(), post_mrc800_give);
+app.post('/mrc800/transfer', post_mrc800_transfer);
+app.post('/mrc800/take', post_mrc800_take);
+app.post('/mrc800/give', post_mrc800_give);
 
 
 // token update for mrc040
-app.post('/tokenUpdate/TokenBase/:tkey/:token/:baseToken', upload.array(), post_tokenupdate_tokenbase);
-app.post('/tokenUpdate/TokenTargetAdd/:tkey/:token/:targetToken', upload.array(), post_tokenupdate_tokentargetadd);
-app.post('/tokenUpdate/TokenTargetRemove/:tkey/:token/:targetToken', upload.array(), post_tokenupdate_tokentargetremove);
+app.post('/tokenUpdate/TokenBase/:tkey/:token/:baseToken', post_tokenupdate_tokenbase);
+app.post('/tokenUpdate/TokenTargetAdd/:tkey/:token/:targetToken', post_tokenupdate_tokentargetadd);
+app.post('/tokenUpdate/TokenTargetRemove/:tkey/:token/:targetToken', post_tokenupdate_tokentargetremove);
 
 // for ICO.
-app.post('/buy', upload.array(), post_buy);
+app.post('/buy', post_buy);
 
 // create the key value store as defined in the fabric-client/config/default.json 'key-value-store' setting
 // App init.
