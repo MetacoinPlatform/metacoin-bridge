@@ -1608,6 +1608,7 @@ function post_token_sell(req, res) {
     mtcUtil.ParameterCheck(req.body, 'platform_url', "url", true, 0, 255);
     mtcUtil.ParameterCheck(req.body, 'platform_address', "address", true);
     mtcUtil.ParameterCheck(req.body, 'platform_commission', "string", true, 0, 5);
+    mtcUtil.ParameterCheck(req.body, 'min_trade_unit', "int", true, 1, 100000000);
 
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.body, 'tkey');
@@ -1620,7 +1621,7 @@ function post_token_sell(req, res) {
         fcn: 'mrc010sell',
         args: [req.body.address, req.body.amount, req.params.mrc010id, req.body.price, req.body.token,
         req.body.platform_name, req.body.platform_url, req.body.platform_address, req.body.platform_commission,
-        req.body.signature, req.body.tkey]
+        req.body.min_trade_unit, req.body.signature, req.body.tkey]
     };
     JobProcess(request, res, tx_id, [req.body.address], []);
 }
@@ -1666,6 +1667,7 @@ function post_token_reqsell(req, res) {
     mtcUtil.ParameterCheck(req.body, 'platform_url', "url", true, 0, 255);
     mtcUtil.ParameterCheck(req.body, 'platform_address', "address", true);
     mtcUtil.ParameterCheck(req.body, 'platform_commission', "string", true, 0, 5);
+    mtcUtil.ParameterCheck(req.body, 'min_trade_unit', "int", true, 1, 100000000);
 
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.body, 'tkey');
@@ -1678,7 +1680,7 @@ function post_token_reqsell(req, res) {
         fcn: 'mrc010reqsell',
         args: [req.body.address, req.body.amount, req.params.mrc010id, req.body.price, req.body.token,
         req.body.platform_name, req.body.platform_url, req.body.platform_address, req.body.platform_commission,
-        req.body.signature, req.body.tkey]
+        req.body.min_trade_unit, req.body.signature, req.body.tkey]
     };
     JobProcess(request, res, tx_id, [req.body.address], []);
 }
