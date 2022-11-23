@@ -52,13 +52,11 @@ const md5 = require('md5');
 const multer = require('multer'),
     upload = multer();
 
-const {
-    crc32
-} = require('crc');
 const Redis = require("ioredis"),
     redis = new Redis(config.redis_server);
 
 const Fabric_Client = require('fabric-client');
+const { json } = require('body-parser');
 const store_path = path.join(__dirname, 'hfc-key-store');
 
 
@@ -211,7 +209,6 @@ function JobProcess(req, res, tx_id, addresses, token, addTime) {
         let address;
         for (address of addresses) {
             if (JobManager.pendingA.has(address)) {
-                // console.log('address dupe ', address)
                 needPedning = true;
                 break;
             }
@@ -265,11 +262,19 @@ function InvokeGet(request, res) {
                 throw new Error('Response Error');
             }
         }).catch((err) => {
-            res.json({
-                result: 'ERROR',
-                msg: err.message,
-                data: ''
-            });
+            if (request.fcn == "get" && request.args.length > 0) {
+                res.json({
+                    result: 'ERROR',
+                    msg: request.args[0] + " not found",
+                    data: ''
+                });
+            } else {
+                res.json({
+                    result: 'ERROR',
+                    msg: err.message,
+                    data: ''
+                });
+            }
         });
 }
 
@@ -359,7 +364,6 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
             promises.push(txPromise);
             return Promise.all(promises);
         }).then(async function (results) {
-            console.log('TX EVENT RECV')
             if (results && results[0] && results[0].status === 'SUCCESS') { } else {
                 throw new Error('Failed to order the transaction.');
             }
@@ -372,7 +376,7 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
 
                 let tx = await FabricManager.channel.queryTransaction(tx_id.getTransactionID(),
                     FabricManager.peer, false, false);
-                let tx_parse = parse_transaction(tx);
+                let tx_parse = parse_transaction(tx, null, null);
                 switch (request.fcn) {
                     case "newwallet":
                         res.json({
@@ -502,7 +506,7 @@ function getHyperLedgerData(key) {
 
 
 
-function parse_transaction(transaction) {
+function parse_transaction(transaction, db_id, db_sn) {
     var actlist = transaction.transactionEnvelope.payload.data.actions;
     var txsave_data = [];
     for (var act in actlist) {
@@ -514,7 +518,9 @@ function parse_transaction(transaction) {
                     id: transaction.transactionEnvelope.payload.header.channel_header.tx_id,
                     parameters: [],
                     token: "",
-                    type: "Chaincode Install or Update"
+                    type: "Chaincode Install or Update",
+                    db_id: db_id,
+                    db_sn: db_sn
                 });
             }
             continue;
@@ -569,7 +575,9 @@ function parse_transaction(transaction) {
                     values: params || '',
                     validationCode: transaction.validationCode,
                     address: '',
-                    datakey: rwsetlist[rwset].rwset.writes[w].key
+                    datakey: rwsetlist[rwset].rwset.writes[w].key,
+                    db_id: db_id,
+                    db_sn: db_sn
                 };
                 if (txv.type == '') {
                     continue;
@@ -584,7 +592,9 @@ function parse_transaction(transaction) {
                     values: params || '',
                     validationCode: transaction.validationCode,
                     address: '',
-                    datakey: rwsetlist[rwset].rwset.writes[w].key
+                    datakey: rwsetlist[rwset].rwset.writes[w].key,
+                    db_id: db_id,
+                    db_sn: db_sn
                 };
 
                 if (mtcUtil.isAddress(rwsetlist[rwset].rwset.writes[w].key)) {
@@ -667,7 +677,6 @@ function get_block(req, res, next) {
 
     FabricManager.channel.queryBlock(block_no, FabricManager.peer, false, false)
         .then(function (block) {
-            console.log('query block result');
             if (typeof block == typeof "" && block != "") {
                 res.json({
                     result: 'SUCCESS',
@@ -687,7 +696,7 @@ function get_block(req, res, next) {
             for (var act in block.data.data) {
                 Promise_list.push(FabricManager.channel.queryTransaction(block.data.data[act].payload.header.channel_header.tx_id, FabricManager.peer, false, false)
                     .then(function (transaction) {
-                        return Promise.resolve(parse_transaction(transaction));
+                        return Promise.resolve(parse_transaction(transaction, db_data.id, db_data.sn));
                     })
                     .catch(function (err) {
                         return Promise.resolve("");
@@ -712,7 +721,7 @@ function get_block(req, res, next) {
                             timestamp: tx_list[idx][0].timestamp
                         });
                     }
-                    console.log(new Date().toLocaleString(), 556, 'dummy count,', dummy_cnt, ', tx count', db_data.transaction.length);
+                    // console.log(new Date().toLocaleString(), 556, 'dummy count,', dummy_cnt, ', tx count', db_data.transaction.length);
                     redis.set("BLOCK_" + block_no, JSON.stringify(db_data), "EX", 600);
                     res.json({
                         result: 'SUCCESS',
@@ -735,53 +744,63 @@ function get_block(req, res, next) {
         });
 }
 
-
-app.get('/transactionraw/:transaction_id', (req, res) => {
-    FabricManager.channel.queryTransaction(req.params.transaction_id, FabricManager.peer, false, false)
-        .then(function (transaction) {
-            var actlist = transaction.transactionEnvelope.payload.data.actions;
-            var txsave_data = [];
-            for (var act in actlist) {
-                var rwsetlist = actlist[act].payload.action.proposal_response_payload.extension.results.ns_rwset;
-                for (var rwset in rwsetlist) {
-                    if (rwsetlist.length == 1 && rwsetlist[rwset].namespace == 'lscc') {
-                        continue;
-                    }
-                    for (var w in rwsetlist[rwset].rwset.writes) {
-                        if (rwsetlist[rwset].rwset.writes[w].key == 'MetaCoinICO') {
-                            continue;
-                        }
-                        console.log(rwsetlist[rwset].rwset.writes[w].key);
-                        txsave_data.push({
-                            data: rwsetlist[rwset].rwset.writes[w].value,
-                            validationCode: transaction.validationCode,
-                            datakey: rwsetlist[rwset].rwset.writes[w].key
-                        });
-                    }
-                }
-            }
-            txsave_data.reverse();
-            res.json({ result: 'SUCCESS', msg: '', data: txsave_data });
+app.get('/blockByTX/:transaction_id', (req, res) => {
+    FabricManager.channel.queryBlockByTxID(req.params.transaction_id, FabricManager.peer, false, false)
+        .then(function (block) {
+            res.json({ result: 'SUCCESS', msg: '', data: block.header })
         })
         .catch(function (err) {
             res.json({ result: 'ERROR', msg: err.message, data: '' });
-        });
+        });;
 });
 
+app.get('/transactionraw/:transaction_id', (req, res) => {
+    let blockInfo;
+    FabricManager.channel.queryBlockByTxID(req.params.transaction_id, FabricManager.peer, false, false)
+        .then(function (block) {
+            blockInfo = block;
+            return FabricManager.channel.queryTransaction(req.params.transaction_id, FabricManager.peer, false, false)
+                .then(function (transaction) {
+                    var actlist = transaction.transactionEnvelope.payload.data.actions;
+                    var txsave_data = [];
+                    for (var act in actlist) {
+                        var rwsetlist = actlist[act].payload.action.proposal_response_payload.extension.results.ns_rwset;
+                        for (var rwset in rwsetlist) {
+                            if (rwsetlist.length == 1 && rwsetlist[rwset].namespace == 'lscc') {
+                                continue;
+                            }
+                            for (var w in rwsetlist[rwset].rwset.writes) {
+                                if (rwsetlist[rwset].rwset.writes[w].key == 'MetaCoinICO') {
+                                    continue;
+                                }
+                                txsave_data.push({
+                                    db_id: blockInfo.header.data_hash,
+                                    db_sn: blockInfo.header.number,
+                                    data: rwsetlist[rwset].rwset.writes[w].value,
+                                    validationCode: transaction.validationCode,
+                                    datakey: rwsetlist[rwset].rwset.writes[w].key
+                                });
+                                console.log(txsave_data);
+                            }
+                        }
+                    }
+                    txsave_data.reverse();
+                    res.json({ result: 'SUCCESS', msg: '', data: txsave_data });
+                })
+                .catch(function (err) {
+                    res.json({ result: 'ERROR', msg: err.message, data: '' });
+                });
+        });
+
+});
 
 function get_transaction(req, res, next) {
-    redis.get("TX_" + req.params.transaction_id)
-        .then(function (value) {
-            if (value != null && value) {
-                return Promise.resolve(value);
-            } else {
-                return FabricManager.channel.queryTransaction(req.params.transaction_id, FabricManager.peer, false, false);
-            }
+    let blockInfo;
+    FabricManager.channel.queryBlockByTxID(req.params.transaction_id, FabricManager.peer, false, false)
+        .then(function (block) {
+            blockInfo = block;
+            return FabricManager.channel.queryTransaction(req.params.transaction_id, FabricManager.peer, false, false);
         })
-        .catch(function (err) {
-            return Promise.reject(err);
-        })
-
         .then(function (tx_data) {
             if (typeof tx_data == typeof "" && tx_data != "") {
                 res.json({
@@ -790,8 +809,7 @@ function get_transaction(req, res, next) {
                     data: JSON.parse(tx_data)
                 });
             } else {
-                let tx_save_data = parse_transaction(tx_data);
-                redis.set("TX_" + req.params.transaction_id, JSON.stringify(tx_save_data), "EX", 600);
+                let tx_save_data = parse_transaction(tx_data, blockInfo.header.data_hash, blockInfo.header.number);
                 res.json({
                     result: 'SUCCESS',
                     msg: '',
@@ -999,8 +1017,6 @@ function get_mrc040(req, res, next) {
         });
 }
 
-
-
 function get_token(req, res, next) {
     mtcUtil.ParameterCheck(req.params, "token");
     const request = {
@@ -1011,6 +1027,18 @@ function get_token(req, res, next) {
     InvokeGet(request, res);
 }
 
+function get_token_dex(req, res, next) {
+    mtcUtil.ParameterCheck(req.params, "mrc010dexid", "string", false, 40, 40);
+    if (!req.params.mrc010dexid.startsWith("DEX010_") || req.params.mrc010dexid.length != 40) {
+        throw new Error(req.params.mrc010dexid + " is not MRC010 DEX ID");
+    }
+    const request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'get',
+        args: [req.params.mrc010dexid]
+    };
+    InvokeGet(request, res);
+}
 
 function post_address(req, res, next) {
     res.header('Cache-Control', 'no-cache');
@@ -2247,9 +2275,6 @@ function post_mrc401_melt(req, res) {
     JobProcess(request, res, tx_id, [], []);
 }
 
-
-
-
 function get_mrc402(req, res) {
     mtcUtil.ParameterCheck(req.params, 'mrc402id');
     res.header('Cache-Control', 'no-cache');
@@ -2257,6 +2282,20 @@ function get_mrc402(req, res) {
         chaincodeId: config.chain_code_id,
         fcn: 'mrc402get',
         args: [req.params.mrc402id]
+    };
+    InvokeGet(request, res);
+}
+
+function get_mrc402_dex(req, res) {
+    mtcUtil.ParameterCheck(req.params, 'mrc402dexid');
+    mtcUtil.ParameterCheck(req.params, "mrc402dexid", "string", false, 40, 40);
+    if (!req.params.mrc402dexid.startsWith("DEX402_") || req.params.mrc402dexid.length != 40) {
+        throw new Error(req.params.mrc402dexid + " is not MRC402 DEX ID");
+    }
+    const request = {
+        chaincodeId: config.chain_code_id,
+        fcn: 'get',
+        args: [req.params.mrc402dexid]
     };
     InvokeGet(request, res);
 }
@@ -2674,6 +2713,8 @@ app.post('/exchange/:fromTkey/:toTkey', post_exchange);
 
 // token
 app.get('/token/:token', get_token);
+app.get('/token/dex/:mrc010dexid', get_token_dex);
+
 app.post('/token', post_token);
 app.post('/token/:tkey', post_token_tkey);
 // token update
@@ -2739,6 +2780,7 @@ app.put('/mrc401/:mrc400id', put_mrc401_update);
 app.post('/mrc401/:mrc400id', post_mrc401);
 
 app.get('/mrc402/:mrc402id', get_mrc402);
+app.get('/mrc402/dex/:mrc402dexid', get_mrc402_dex);
 app.post('/mrc402', post_mrc402);
 app.post('/mrc402/transfer/:mrc402id', post_mrc402_transfer);
 app.put('/mrc402/update/:mrc402id', put_mrc402);

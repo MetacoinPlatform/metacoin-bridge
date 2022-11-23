@@ -10,7 +10,7 @@
     "fabric-ca-client": "^2.2.13",
     "fabric-client": "^1.4.20",
     "grpc": "^1.24.11",
-    "ioredis": "^4.28.5",
+    "ioredis": "^5.2.4",
     "md5": "^2.3.0",
     "multer": "^1.4.4",
     "promise": "^8.1.0",
