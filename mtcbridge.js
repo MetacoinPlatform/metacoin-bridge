@@ -715,14 +715,12 @@ function get_block(req, res, next) {
                             dummy_cnt = dummy_cnt + 1;
                             continue;
                         }
-                        redis.set("TX_" + tx_list[idx][0].id, JSON.stringify(tx_list[idx]), "EX", 600);
                         db_data.transaction.push({
                             id: tx_list[idx][0].id,
                             timestamp: tx_list[idx][0].timestamp
                         });
                     }
                     // console.log(new Date().toLocaleString(), 556, 'dummy count,', dummy_cnt, ', tx count', db_data.transaction.length);
-                    redis.set("BLOCK_" + block_no, JSON.stringify(db_data), "EX", 600);
                     res.json({
                         result: 'SUCCESS',
                         msg: '',
