@@ -2036,13 +2036,13 @@ function post_mrc400(req, res) {
 function put_mrc400(req, res) {
     mtcUtil.ParameterCheck(req.params, 'mrc400id');
     mtcUtil.ParameterCheck(req.body, 'name', 'string', true, 0, 128);
-    mtcUtil.ParameterCheck(req.body, 'url', "url", 0, 255);
-    mtcUtil.ParameterCheck(req.body, 'imageurl', "url", 0, 255);
-    mtcUtil.ParameterCheck(req.body, "allowtoken", "int", 1, 40);
+    mtcUtil.ParameterCheck(req.body, 'url', "url", false, 0, 255);
+    mtcUtil.ParameterCheck(req.body, 'imageurl', "url", false, 0, 255);
+    mtcUtil.ParameterCheck(req.body, "allowtoken", "int", false, 1, 40);
     mtcUtil.ParameterCheck(req.body, 'category', 'string', true, 0, 64);
     mtcUtil.ParameterCheck(req.body, 'description', 'string', true, 0, 4096);
-    mtcUtil.ParameterCheck(req.body, 'itemurl', "url", 0, 255);
-    mtcUtil.ParameterCheck(req.body, 'itemimageurl', "url", 0, 255);
+    mtcUtil.ParameterCheck(req.body, 'itemurl', "url", false, 0, 255);
+    mtcUtil.ParameterCheck(req.body, 'itemimageurl', "url", false, 0, 255);
     mtcUtil.ParameterCheck(req.body, 'data', 'string', true, 0, 4096);
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.body, 'tkey');
