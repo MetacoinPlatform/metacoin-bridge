@@ -3,3 +3,4 @@ CVS
 hfc-key-store/*
 config.json
 node_modules
+yarn.lock
