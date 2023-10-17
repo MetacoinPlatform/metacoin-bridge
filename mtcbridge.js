@@ -309,7 +309,6 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
         .then(function (results) {
             var proposalResponses = results[0];
             var proposal = results[1];
-
             if (proposalResponses && proposalResponses[0].response &&
                 proposalResponses[0].response.status === 200) {
             } else {
@@ -320,7 +319,13 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
                 throw new Error(proposalResponses[0].message);
             }
 
-            var request = {
+            try{
+                request.server_response = proposalResponses[0].response.payload.toString()
+            } catch (err){
+                request.server_response = ""
+            }
+            
+            var tx_equest = {
                 proposalResponses: proposalResponses,
                 proposal: proposal
             };
@@ -329,7 +334,7 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
             var transaction_id_string = tx_id.getTransactionID();
             var promises = [];
             try {
-                var sendPromise = FabricManager.channel.sendTransaction(request);
+                var sendPromise = FabricManager.channel.sendTransaction(tx_equest, 3000);
                 //we want the send transaction first, so that we know where to check status
                 promises.push(sendPromise);
             } catch (err) {
@@ -458,8 +463,6 @@ function InvokePost(request, res, tx_id, pending_addrs, pending_tokens) {
             } else {
                 throw new Error('Transaction failed to be committed to the ledger due to ' + results[1].event_status);
             }
-
-            // console.log(new Date().toLocaleString(), 482, 'InvokePost', tx_id.getTransactionID());
         }).catch(function (err) {
             console.log(new Date().toLocaleString(), 482, request.fcn, request.args, err.message);
             if (res == null) {
@@ -929,7 +932,7 @@ function get_mrc030_finish(req, res, next) {
 function post_mrc030(req, res, next) {
     res.header('Cache-Control', 'no-cache');
     mtcUtil.ParameterCheck(req.body, 'owner', "address");
-    mtcUtil.ParameterCheck(req.body, 'title', "", false, 1, 256);
+    mtcUtil.ParameterCheck(req.body, 'title', "", false, 1, 255);
     mtcUtil.ParameterCheck(req.body, 'description', "", false, 0, 2048);
     mtcUtil.ParameterCheck(req.body, 'startdate', "int");
     mtcUtil.ParameterCheck(req.body, 'enddate', "int");
@@ -2007,14 +2010,16 @@ function get_mrc400(req, res) {
 function post_mrc400(req, res) {
     mtcUtil.ParameterCheck(req.body, 'owner', "address");
     mtcUtil.ParameterCheck(req.body, 'name', "string", false, 0, 128);
-    mtcUtil.ParameterCheck(req.body, 'url', "url", false, 1, 255);
+    mtcUtil.ParameterCheck(req.body, 'url', "url", false, 1, 1024);
     mtcUtil.ParameterCheck(req.body, 'imageurl', "url", false, 1, 255);
-    mtcUtil.ParameterCheck(req.body, "allowtoken", "int", false, 1, 40);
-    mtcUtil.ParameterCheck(req.body, 'category', "string", false, 1, 64);
-    mtcUtil.ParameterCheck(req.body, 'description', "string", false, 1, 4096);
-    mtcUtil.ParameterCheck(req.body, 'itemurl', "url", false, 1, 255);
-    mtcUtil.ParameterCheck(req.body, 'itemimageurl', "url", false, 1, 255);
-    mtcUtil.ParameterCheck(req.body, 'data', "string", true, 1, 4096);
+    mtcUtil.ParameterCheck(req.body, "allowtoken", "int", true, 0, 40);
+    mtcUtil.ParameterCheck(req.body, 'itemurl', "url", true, 1, 255);
+    mtcUtil.ParameterCheck(req.body, 'itemimageurl', "url", true, 1, 255);
+    mtcUtil.ParameterCheck(req.body, 'category', "string", true, 1, 64);
+    mtcUtil.ParameterCheck(req.body, 'description', "string", true, 1, 40960);
+    mtcUtil.ParameterCheck(req.body, 'socialmedia', "string", true, 1, 40960);
+    mtcUtil.ParameterCheck(req.body, 'partner', "string", true, 1, 4096);
+    mtcUtil.ParameterCheck(req.body, 'data', "string", true, 1, 40960);
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.body, 'tkey');
 
@@ -2024,7 +2029,9 @@ function post_mrc400(req, res) {
         chainId: config.channel_name,
         txId: tx_id,
         fcn: 'mrc400create',
-        args: [req.body.owner, req.body.name, req.body.url, req.body.imageurl, req.body.allowtoken, req.body.category, req.body.description, req.body.itemurl, req.body.itemimageurl, req.body.data, req.body.signature, req.body.tkey]
+        args: [req.body.owner, req.body.name, req.body.url, req.body.imageurl, req.body.allowtoken, 
+            req.body.itemurl, req.body.itemimageurl, req.body.category, req.body.description, req.body.socialmedia,
+            req.body.partner, req.body.data, req.body.signature, req.body.tkey]
     };
     JobProcess(request, res, tx_id, [req.body.owner], []);
 
@@ -2033,15 +2040,17 @@ function post_mrc400(req, res) {
 
 function put_mrc400(req, res) {
     mtcUtil.ParameterCheck(req.params, 'mrc400id');
-    mtcUtil.ParameterCheck(req.body, 'name', 'string', true, 0, 128);
-    mtcUtil.ParameterCheck(req.body, 'url', "url", false, 0, 255);
-    mtcUtil.ParameterCheck(req.body, 'imageurl', "url", false, 0, 255);
-    mtcUtil.ParameterCheck(req.body, "allowtoken", "int", false, 1, 40);
-    mtcUtil.ParameterCheck(req.body, 'category', 'string', true, 0, 64);
-    mtcUtil.ParameterCheck(req.body, 'description', 'string', true, 0, 4096);
-    mtcUtil.ParameterCheck(req.body, 'itemurl', "url", false, 0, 255);
-    mtcUtil.ParameterCheck(req.body, 'itemimageurl', "url", false, 0, 255);
-    mtcUtil.ParameterCheck(req.body, 'data', 'string', true, 0, 4096);
+    mtcUtil.ParameterCheck(req.body, 'name', "string", false, 0, 128);
+    mtcUtil.ParameterCheck(req.body, 'url', "url", false, 1, 1024);
+    mtcUtil.ParameterCheck(req.body, 'imageurl', "url", false, 1, 255);
+    mtcUtil.ParameterCheck(req.body, "allowtoken", "int", true, 0, 40);
+    mtcUtil.ParameterCheck(req.body, 'itemurl', "url", false, 1, 255);
+    mtcUtil.ParameterCheck(req.body, 'itemimageurl', "url", false, 1, 255);
+    mtcUtil.ParameterCheck(req.body, 'category', "string", false, 1, 64);
+    mtcUtil.ParameterCheck(req.body, 'description', "string", false, 1, 40960);
+    mtcUtil.ParameterCheck(req.body, 'socialmedia', "string", false, 1, 40960);
+    mtcUtil.ParameterCheck(req.body, 'partner', "string", false, 1, 4096);
+    mtcUtil.ParameterCheck(req.body, 'data', "string", false, 1, 40960);
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.body, 'tkey');
 
@@ -2051,7 +2060,9 @@ function put_mrc400(req, res) {
         chainId: config.channel_name,
         txId: tx_id,
         fcn: 'mrc400update',
-        args: [req.params.mrc400id, req.body.name, req.body.url, req.body.imageurl, req.body.allowtoken, req.body.category, req.body.description, req.body.itemurl, req.body.itemimageurl, req.body.data, req.body.signature, req.body.tkey]
+        args: [req.params.mrc400id, req.body.name, req.body.url, req.body.imageurl, req.body.allowtoken, 
+            req.body.itemurl, req.body.itemimageurl, req.body.category, req.body.description, req.body.socialmedia, 
+            req.body.partner, req.body.data, req.body.signature, req.body.tkey]
     };
     JobProcess(request, res, tx_id, [], []);
 }
@@ -2073,6 +2084,7 @@ function get_mrc401(req, res) {
 
 function post_mrc401(req, res) {
     mtcUtil.ParameterCheck(req.params, 'mrc400id');
+    mtcUtil.ParameterCheck(req.body, 'creator', 'string', false, 40, 40);
     mtcUtil.ParameterCheck(req.body, 'itemdata');
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.body, 'tkey');
@@ -2083,14 +2095,49 @@ function post_mrc401(req, res) {
         chainId: config.channel_name,
         txId: tx_id,
         fcn: 'mrc401create',
-        args: [req.params.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
+        args: [req.params.mrc400id, req.body.creator, req.body.itemdata, req.body.signature, req.body.tkey]
     };
     JobProcess(request, res, tx_id, [], []);
 }
 
 
+function post_mrc401_createtrade(req, res) {
+    mtcUtil.ParameterCheck(req.params, 'mrc400id');
+    mtcUtil.ParameterCheck(req.body, 'creator', "address");
+    mtcUtil.ParameterCheck(req.body, 'itemdata');
+    mtcUtil.ParameterCheck(req.body, 'buyer', "address");
+    mtcUtil.ParameterCheck(req.body, 'price', "int");
+
+    mtcUtil.ParameterCheck(req.body, 'token', "int");
+    mtcUtil.ParameterCheck(req.body, 'platform_name', "string", true, 0, 255);
+    mtcUtil.ParameterCheck(req.body, 'platform_url', "url", true, 0, 255);
+    mtcUtil.ParameterCheck(req.body, 'platform_address', "address", true);
+    mtcUtil.ParameterCheck(req.body, 'platform_commission', "string", true, 0, 5);
+
+    mtcUtil.ParameterCheck(req.body, 'creatorSignature');
+    mtcUtil.ParameterCheck(req.body, 'creatorNonce');
+    mtcUtil.ParameterCheck(req.body, 'buyerSignature');
+    mtcUtil.ParameterCheck(req.body, 'buyerNonce');
+
+
+    var tx_id = FabricManager.client.newTransactionID();
+    var request = {
+        chaincodeId: config.chain_code_id,
+        chainId: config.channel_name,
+        txId: tx_id,
+        fcn: 'mrc401createtrade',
+        args: [req.params.mrc400id, req.body.creator, req.body.itemdata, req.body.buyer, req.body.price,
+            req.body.token, req.body.platform_name, req.body.platform_url, req.body.platform_address, req.body.platform_commission,
+            req.body.creatorSignature, req.body.creatorNonce, req.body.buyerSignature, req.body.buyerNonce]
+    };
+    JobProcess(request, res, tx_id, [], []);
+}
+
+
+
 function put_mrc401_update(req, res) {
     mtcUtil.ParameterCheck(req.params, 'mrc400id');
+    mtcUtil.ParameterCheck(req.body, 'creator', 'string', false, 40, 40);
     mtcUtil.ParameterCheck(req.body, 'itemdata');
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.body, 'tkey');
@@ -2101,7 +2148,7 @@ function put_mrc401_update(req, res) {
         chainId: config.channel_name,
         txId: tx_id,
         fcn: 'mrc401update',
-        args: [req.params.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
+        args: [req.params.mrc400id, req.body.creator, req.body.itemdata, req.body.signature, req.body.tkey]
     };
     JobProcess(request, res, tx_id, [], []);
 }
@@ -2128,7 +2175,6 @@ function post_mrc401_transfer(req, res) {
 
 function post_mrc401_sell(req, res) {
     mtcUtil.ParameterCheck(req.body, 'seller', "address");
-    mtcUtil.ParameterCheck(req.body, 'mrc400id');
     mtcUtil.ParameterCheck(req.body, 'itemdata');
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.body, 'tkey');
@@ -2139,7 +2185,7 @@ function post_mrc401_sell(req, res) {
         chainId: config.channel_name,
         txId: tx_id,
         fcn: 'mrc401sell',
-        args: [req.body.seller, req.body.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
+        args: [req.body.seller,  req.body.itemdata, req.body.signature, req.body.tkey]
     };
     JobProcess(request, res, tx_id, [req.body.seller], []);
 
@@ -2148,7 +2194,6 @@ function post_mrc401_sell(req, res) {
 
 function post_mrc401_unsell(req, res) {
     mtcUtil.ParameterCheck(req.body, 'seller', "address");
-    mtcUtil.ParameterCheck(req.body, 'mrc400id');
     mtcUtil.ParameterCheck(req.body, 'itemdata');
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.body, 'tkey');
@@ -2160,7 +2205,7 @@ function post_mrc401_unsell(req, res) {
         chainId: config.channel_name,
         txId: tx_id,
         fcn: 'mrc401unsell',
-        args: [req.body.seller, req.body.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
+        args: [req.body.seller,  req.body.itemdata, req.body.signature, req.body.tkey]
     };
     JobProcess(request, res, tx_id, [req.body.seller], []);
 
@@ -2188,7 +2233,6 @@ function post_mrc401_buy(req, res) {
 
 function post_mrc401_auction(req, res) {
     mtcUtil.ParameterCheck(req.body, 'seller', "address");
-    mtcUtil.ParameterCheck(req.body, 'mrc400id');
     mtcUtil.ParameterCheck(req.body, 'itemdata');
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.body, 'tkey');
@@ -2199,14 +2243,14 @@ function post_mrc401_auction(req, res) {
         chainId: config.channel_name,
         txId: tx_id,
         fcn: 'mrc401auction',
-        args: [req.body.seller, req.body.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
+        args: [req.body.seller, req.body.itemdata, req.body.signature, req.body.tkey]
     };
     JobProcess(request, res, tx_id, [req.body.seller], []);
 }
 
 function post_mrc401_unauction(req, res) {
+    console.log(req.body)
     mtcUtil.ParameterCheck(req.body, 'seller', "address");
-    mtcUtil.ParameterCheck(req.body, 'mrc400id');
     mtcUtil.ParameterCheck(req.body, 'itemdata');
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.body, 'tkey');
@@ -2217,7 +2261,7 @@ function post_mrc401_unauction(req, res) {
         chainId: config.channel_name,
         txId: tx_id,
         fcn: 'mrc401unauction',
-        args: [req.body.seller, req.body.mrc400id, req.body.itemdata, req.body.signature, req.body.tkey]
+        args: [req.body.seller, req.body.itemdata, req.body.signature, req.body.tkey]
     };
     JobProcess(request, res, tx_id, [req.body.seller], []);
 }
@@ -2240,7 +2284,6 @@ function post_mrc401_bid(req, res) {
     mtcUtil.ParameterCheck(req.params, 'mrc401id');
     mtcUtil.ParameterCheck(req.body, 'buyer', "address");
     mtcUtil.ParameterCheck(req.body, 'amount', "int");
-    mtcUtil.ParameterCheck(req.body, 'token', "int");
     mtcUtil.ParameterCheck(req.body, 'signature');
     mtcUtil.ParameterCheck(req.body, 'tkey');
 
@@ -2250,10 +2293,9 @@ function post_mrc401_bid(req, res) {
         chainId: config.channel_name,
         txId: tx_id,
         fcn: 'mrc401bid',
-        args: [req.body.buyer, req.params.mrc401id, req.body.amount, req.body.token, req.body.signature, req.body.tkey]
+        args: [req.body.buyer, req.params.mrc401id, req.body.amount, req.body.signature, req.body.tkey]
     };
     JobProcess(request, res, tx_id, [req.body.buyer], []);
-
 }
 
 
@@ -2776,6 +2818,7 @@ app.post('/mrc401/unauction', post_mrc401_unauction);
 app.get('/mrc401/auctionfinish/:mrc401id', get_mrc401_auctionfinish);
 app.put('/mrc401/:mrc400id', put_mrc401_update);
 app.post('/mrc401/:mrc400id', post_mrc401);
+app.post('/mrc401/createtrade/:mrc400id', post_mrc401_createtrade);
 
 app.get('/mrc402/:mrc402id', get_mrc402);
 app.get('/mrc402/dex/:mrc402dexid', get_mrc402_dex);
