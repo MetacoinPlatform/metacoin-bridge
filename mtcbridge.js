@@ -2025,7 +2025,7 @@ function post_mrc400(req, res) {
 		txId: tx_id,
 		fcn: 'mrc400create',
 		args: [req.body.owner, req.body.name, req.body.url, req.body.imageurl, req.body.allowtoken,
-		req.body.itemurl, req.body.itemimageurl, req.body.category, req.body.description,
+		req.body.category, req.body.description, req.body.itemurl, req.body.itemimageurl,
 		req.body.data, req.body.signature, req.body.tkey]
 	};
 	JobProcess(request, res, tx_id, [req.body.owner], []);
@@ -2054,8 +2054,8 @@ function put_mrc400(req, res) {
 		txId: tx_id,
 		fcn: 'mrc400update',
 		args: [req.params.mrc400id, req.body.name, req.body.url, req.body.imageurl,
-		req.body.allowtoken, req.body.itemurl, req.body.itemimageurl, req.body.category,
-		req.body.description, req.body.data, req.body.signature, req.body.tkey]
+		req.body.allowtoken, req.body.category, req.body.description, req.body.itemurl,
+		req.body.itemimageurl, req.body.data, req.body.signature, req.body.tkey]
 	};
 	JobProcess(request, res, tx_id, [], []);
 }
