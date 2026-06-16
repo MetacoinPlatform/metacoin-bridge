@@ -25,6 +25,5 @@
 	"keywords": [
 		"MetaCoin",
 		"MTC"
-	],
-	"packageManager": "yarn@4.17.0"
+	]
 }
