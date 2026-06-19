@@ -1,1 +1,0 @@
-Copy the certificate file here

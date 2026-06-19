@@ -14,7 +14,7 @@
 		"md5": "^2.3.0",
 		"multer": "^1.4.4",
 		"promise": "^8.1.0",
-		"winston": "^3.8.0"
+		"winston": "2.4.4"
 	},
 	"license": "MIT",
 	"repository": {
