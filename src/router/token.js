@@ -24,7 +24,7 @@ module.exports = function (app, config, FabricManager, InvokeGet, JobProcess) {
 			return next(new Error('totalsupply must be less then 1e30 (without decimals(precision))'));
 		}
 
-		if (typeof req.body.tier == typeof []) {
+		if (Array.isArray(req.body.tier)) {
 			req.body.tier.forEach(function (tier) {
 				tier.startdate = parseInt(tier.startdate);
 				tier.enddate = parseInt(tier.enddate);
@@ -38,7 +38,7 @@ module.exports = function (app, config, FabricManager, InvokeGet, JobProcess) {
 		} else {
 			req.body.tier = [];
 		}
-		if (typeof req.body.reserve == typeof []) {
+		if (Array.isArray(req.body.reserve)) {
 			req.body.reserve.forEach(function (reserve) {
 				reserve.unlockdate = parseInt(reserve.unlockdate);
 				if (!isNormalInteger(reserve.value)) {

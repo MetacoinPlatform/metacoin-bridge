@@ -24,7 +24,7 @@ module.exports = function (app, config, FabricManager, InvokeGet, JobProcess) {
 			return;
 		}
 
-		if (typeof userlist != typeof []) {
+		if (Array.isArray(userlist)) {
 			res.status(400).send("userlist is not array");
 			return;
 		}
@@ -93,7 +93,7 @@ module.exports = function (app, config, FabricManager, InvokeGet, JobProcess) {
 			return;
 		}
 
-		if (typeof userlist != typeof []) {
+		if (Array.isArray(userlist)) {
 			res.status(400).send("userlist is not array");
 			return;
 		}

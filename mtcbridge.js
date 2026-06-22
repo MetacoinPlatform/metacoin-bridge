@@ -78,7 +78,6 @@ app.use(function (req, res, next) {
 	res.header('Access-Control-Allow-Origin', '*');
 	next();
 });
-
 app.use(bodyParser.json({
 	limit: '50mb'
 }));
@@ -680,7 +679,7 @@ function get_block(req, res, next) {
 
 	FabricManager.channel.queryBlock(block_no, FabricManager.peer, false, false)
 		.then(function (block) {
-			if (typeof block == typeof "" && block != "") {
+			if (typeof block === 'string' && block?.trim()) {
 				res.json({
 					result: 'SUCCESS',
 					msg: '',
@@ -803,7 +802,7 @@ function get_transaction(req, res, next) {
 			return FabricManager.channel.queryTransaction(req.params.transaction_id, FabricManager.peer, false, false);
 		})
 		.then(function (tx_data) {
-			if (typeof tx_data == typeof "" && tx_data != "") {
+			if (typeof tx_data === 'string' && tx_data?.trim()) {
 				res.json({
 					result: 'SUCCESS',
 					msg: '',
@@ -1385,7 +1384,7 @@ function post_token(req, res, next) {
 		return next(new Error('totalsupply must be less then 1e30 (without decimals(precision))'));
 	}
 
-	if (typeof req.body.tier == typeof []) {
+	if (Array.isArray(req.body.tier)) {
 		req.body.tier.forEach(function (tier) {
 			tier.startdate = parseInt(tier.startdate);
 			tier.enddate = parseInt(tier.enddate);
@@ -1399,7 +1398,7 @@ function post_token(req, res, next) {
 	} else {
 		req.body.tier = [];
 	}
-	if (typeof req.body.reserve == typeof []) {
+	if (Array.isArray(req.body.reserve)) {
 		req.body.reserve.forEach(function (reserve) {
 			reserve.unlockdate = parseInt(reserve.unlockdate);
 			if (!mtcUtil.isNormalInteger(reserve.value)) {
@@ -1769,7 +1768,7 @@ function post_mrc100_payment(req, res, next) {
 		return;
 	}
 
-	if (typeof userlist != typeof []) {
+	if (Array.isArray(userlist)) {
 		res.status(400).send("userlist is not array");
 		return;
 	}
@@ -1838,7 +1837,7 @@ function post_mrc100_reward(req, res, next) {
 		return;
 	}
 
-	if (typeof userlist != typeof []) {
+	if (Array.isArray(userlist)) {
 		res.status(400).send("userlist is not array");
 		return;
 	}
