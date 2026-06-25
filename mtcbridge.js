@@ -1,8 +1,6 @@
 /* jshint esversion: 6 */
 /* jshint node: true */
 "use strict";
-
-
 /*
  let connectionOptions = {
 		identity: USER_ID,
@@ -2009,7 +2007,7 @@ function get_mrc400(req, res) {
 function post_mrc400(req, res) {
 	mtcUtil.ParameterCheck(req.body, 'owner', "address");
 	mtcUtil.ParameterCheck(req.body, 'name', "string", false, 0, 128);
-	mtcUtil.ParameterCheck(req.body, 'url', "url", false, 1, 1024);
+	mtcUtil.ParameterCheck(req.body, 'url', "url", false, 1, 255);
 	mtcUtil.ParameterCheck(req.body, 'imageurl', "url", false, 1, 255);
 	mtcUtil.ParameterCheck(req.body, "allowtoken", "int", true, 0, 40);
 	mtcUtil.ParameterCheck(req.body, 'itemurl', "url", true, 1, 255);
@@ -2039,7 +2037,7 @@ function post_mrc400(req, res) {
 function put_mrc400(req, res) {
 	mtcUtil.ParameterCheck(req.params, 'mrc400id');
 	mtcUtil.ParameterCheck(req.body, 'name', "string", false, 0, 128);
-	mtcUtil.ParameterCheck(req.body, 'url', "url", false, 1, 1024);
+	mtcUtil.ParameterCheck(req.body, 'url', "url", false, 1, 255);
 	mtcUtil.ParameterCheck(req.body, 'imageurl', "url", false, 1, 255);
 	mtcUtil.ParameterCheck(req.body, "allowtoken", "int", true, 1, 40);
 	mtcUtil.ParameterCheck(req.body, 'itemurl', "url", false, 0, 255);
